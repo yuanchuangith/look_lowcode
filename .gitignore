@@ -6,3 +6,6 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+node_modules/
+!vendor/cpm-cli/dist/
+!vendor/cpm-cli/dist/**
