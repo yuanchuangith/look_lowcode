@@ -43,6 +43,16 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("锁定当前现象、期望规则和无匹配行为", prompt)
         self.assertIn("紧凑只读检查", prompt)
 
+    def test_readonly_skill_never_transitions_to_editor(self) -> None:
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        prompt = (SKILL_ROOT / "agents" / "openai.yaml").read_text(encoding="utf-8")
+        self.assertIn("只读到编辑的显式授权门禁", skill)
+        self.assertIn("不得调用任何 `gxp-lowcode-editor` MCP 工具", skill)
+        self.assertIn("不得加载或主动转入 `gxp-lowcode-edit`", skill)
+        self.assertIn("输出修改方案不构成编辑授权", skill)
+        self.assertIn("当前消息中明确调用 `$gxp-lowcode-edit`", skill)
+        self.assertIn("不得调用或转入 gxp-lowcode-edit", prompt)
+
     def test_source_escalation_is_hit_driven_and_bounded(self) -> None:
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         reference = (SKILL_ROOT / "references" / "source-code-evidence.md").read_text(encoding="utf-8")

@@ -34,6 +34,9 @@ class SourceHintTests(unittest.TestCase):
         self.assertEqual("TestPaper", hints["anchors"]["component_type"])
         self.assertIn("TestPaper", hints["exact_terms"])
         self.assertIn(["document_code", "current_document"], hints["paired_terms"])
+        self.assertIn(["revision_no", "current_revision"], hints["paired_terms"])
+        self.assertIn(["document_code", "revision_no"], hints["paired_terms"])
+        self.assertNotIn(["current_document", "revision_no"], hints["paired_terms"])
 
     def test_api_service_and_real_backend_stack_generate_backend_hints(self) -> None:
         text = (

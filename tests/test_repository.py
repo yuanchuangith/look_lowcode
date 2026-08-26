@@ -127,6 +127,10 @@ class RepositoryTests(unittest.TestCase):
             _page_similarity("岗位矩阵申请", "培训矩阵申请流程"),
             _page_similarity("岗位矩阵申请", "培训矩阵修订流程"),
         )
+        self.assertGreater(
+            _page_similarity("采购订单审批", "采购订单审批流程"),
+            _page_similarity("采购订单审批", "采购订单编辑页面"),
+        )
 
     def test_lists_active_page_actions_with_bounded_query(self) -> None:
         database = QueueDatabase(

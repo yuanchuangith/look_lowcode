@@ -1,6 +1,6 @@
 ---
 name: gxp-lowcode-debug
-description: Use this skill when the user asks to 排查或复核 GXP 低代码、周期培训、公共动作、表单动作、动作名称或编号定位、流程页面反查、试卷下拉、值被清空、无可选值、文件对应试卷、岗位矩阵申请或修订、岗位培训申请、DataFilter、组件实现、请求参数、API、Controller、Service、后端异常栈、草稿保存、发布同步、动态 C# 异常、字段映射或画布节点。通过 gxp-lowcode-readonly MCP 输出页面与动作身份、发布/草稿语义、精确分组和节点、紧凑过滤事实、必要参数、生成 C# 坐标和只读证据；仅在 MCP 命中产生源码锚点时按需读取固定前端/后端仓库。Do not use for database mutations, design edits, publication, routine feature development, or UI-only component work.
+description: Use this skill when the user asks to 排查或复核 GXP 低代码、周期培训、公共动作、表单动作、动作名称或编号定位、流程页面反查、试卷下拉、值被清空、无可选值、文件对应试卷、岗位矩阵申请或修订、岗位培训申请、DataFilter、组件实现、请求参数、API、Controller、Service、后端异常栈、草稿保存、发布同步、动态 C# 异常、字段映射或画布节点。通过 gxp-lowcode-readonly MCP 输出页面与动作身份、发布/草稿语义、精确分组和节点、紧凑过滤事实、必要参数、生成 C# 坐标、只读证据和修改方案；不得调用或转入 gxp-lowcode-editor。仅在 MCP 命中产生源码锚点时按需读取固定前端/后端仓库。Do not use for database mutations, design edits, publication, routine feature development, or UI-only component work.
 ---
 
 # GXP Low-Code Debug
@@ -52,6 +52,14 @@ description: Use this skill when the user asks to 排查或复核 GXP 低代码�
 - 不修改业务数据、表结构、动作 JSON、草稿、发布状态或历史记录。
 - 不直接调用 `mysql.exe`，不拼接连接参数，不读取或回显密码。
 - 优先使用结构化 MCP 工具。`readonly_sql` 仅用于结构化工具不能表达的窄查询，并说明原因。
+
+## 只读到编辑的显式授权门禁
+
+- 本技能只负责定位、只读复核、修改方案和验证方案。不得调用任何 `gxp-lowcode-editor` MCP 工具，不得加载或主动转入 `gxp-lowcode-edit`，也不得创建编辑会话、审批事务或写入草稿。
+- 输出修改方案不构成编辑授权。即使方案完整、用户要求“给出解决方法”或当前结论已经明确，也必须停在方案层，不得自行开始实施。
+- 只读技能可以在结尾说明：如需实施，用户必须在后续消息中明确调用 `$gxp-lowcode-edit`。该说明只是可选入口，不是跨技能调用。
+- 用户随后只说“继续”“按方案改”“实施前面的方案”但没有在当前消息中明确调用 `$gxp-lowcode-edit` 时，仍然保持只读，不调用编辑 MCP；简短提醒需要显式调用后停止。
+- 用户在后续消息中明确调用 `$gxp-lowcode-edit` 后，由编辑技能独立重新确认当前草稿、编译门禁和写入审批；不得把本技能的方案视为已经通过编辑校验或写入审批。
 
 ## 命中驱动源码升级门禁
 

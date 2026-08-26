@@ -110,6 +110,15 @@ at GTEoZQNMJ.GTEoZQNMJ.main(String periodic_id) in :line 213"""
         self.assertEqual("list_page_actions", result["next_tools"][0])
         self.assertIn("Route/Id/OutId", result["page_next_step"])
 
+    def test_page_queries_are_not_limited_to_training_domains(self) -> None:
+        self.assertEqual(
+            ["采购订单审批", "供应商变更页面", "质量事件详情页面"],
+            page_name_queries(
+                "请检查采购订单审批、供应商变更页面，"
+                "质量事件详情页面也需要定位"
+            ),
+        )
+
     def test_exception_history_uses_published_snapshot_but_current_sync_uses_active_copies(self) -> None:
         empty_data = '{"actionData": []}'
         history_csharp = "ABC12345\nhistory failure\nreturn;"
