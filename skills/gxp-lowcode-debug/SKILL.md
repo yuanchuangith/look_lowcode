@@ -1,6 +1,6 @@
 ---
 name: gxp-lowcode-debug
-description: Use this skill when the user asks to 排查或复核 GXP 低代码、周期培训、公共动作、表单动作、动作名称或编号定位、流程页面反查、试卷下拉、值被清空、无可选值、文件对应试卷、岗位矩阵申请或修订、岗位培训申请、DataFilter、草稿保存、发布同步、动态 C# 异常、字段映射或画布节点。通过 gxp-lowcode-readonly MCP 输出页面与动作身份、发布/草稿语义、精确分组和节点、紧凑过滤事实、必要参数、生成 C# 坐标、只读证据和画布修改方案。Do not use for database mutations, design edits, publication, routine feature development, or UI-only component work.
+description: Use this skill when the user asks to 排查或复核 GXP 低代码、周期培训、公共动作、表单动作、动作名称或编号定位、流程页面反查、试卷下拉、值被清空、无可选值、文件对应试卷、岗位矩阵申请或修订、岗位培训申请、DataFilter、组件实现、请求参数、API、Controller、Service、后端异常栈、草稿保存、发布同步、动态 C# 异常、字段映射或画布节点。通过 gxp-lowcode-readonly MCP 输出页面与动作身份、发布/草稿语义、精确分组和节点、紧凑过滤事实、必要参数、生成 C# 坐标和只读证据；仅在 MCP 命中产生源码锚点时按需读取固定前端/后端仓库。Do not use for database mutations, design edits, publication, routine feature development, or UI-only component work.
 ---
 
 # GXP Low-Code Debug
@@ -20,7 +20,7 @@ description: Use this skill when the user asks to 排查或复核 GXP 低代码�
 - “现在可以选择全部”可能是故障现象，也可能是期望，不能自行判断极性。用户纠正后立即更新上述三行，只重算结论。
 - 会话中已经确认的 action code、RefId、页面 Route、分组、组件 key 和业务不变量都是会话锚点。后续追问优先复用，不得从头重复搜索。
 - 只有动作身份或设计版本可能变化时才重新解析；用户仅纠正期望规则时，不重新读取不相关页面、动作或生成 C#。
-- 对文件对应试卷的默认业务不变量表述为：仅允许 `file_id + file_version` 对应的试卷；查不到对应关系时，下拉为空且不可选择。若用户未确认该规则，只把它作为待确认项，不作为既定事实。
+- 不内置任何具体表名、字段名或字段组合。业务不变量必须从用户本次确认的期望规则动态提取；字段组合、允许集合和无匹配行为都只对当前问题有效。
 
 ## 紧凑读取门禁
 
@@ -53,6 +53,22 @@ description: Use this skill when the user asks to 排查或复核 GXP 低代码�
 - 不直接调用 `mysql.exe`，不拼接连接参数，不读取或回显密码。
 - 优先使用结构化 MCP 工具。`readonly_sql` 仅用于结构化工具不能表达的窄查询，并说明原因。
 
+## 命中驱动源码升级门禁
+
+始终先完成低代码 MCP 定位，再检查响应中的 `source_hints`。MCP 只返回逻辑锚点，不读取本地源码。
+
+- 画布参数、过滤条件或分支已经直接违反已确认业务规则：结论停在低代码证据，不查源码。
+- 低代码配置正确但运行表现不同，并命中组件 type/key、事件或 model key：只读前端仓库。
+- 命中 API Route、Controller、Service、方法或非动态 `GxP2.*` 栈：只读后端仓库。
+- 请求构造与后端接收字段可能不一致，且 `source_hints.candidate_layers` 同时含前后端：先前端、再后端。
+- `CallAction`、`CallPublicAction`、普通表名或字段名不能单独触发源码扫描；继续追踪低代码动作。
+- 仅缺少真实交互状态且没有精确源码锚点：按运行页面证据流程升级浏览器，不扫描仓库。
+- 纯 UI 样式、渲染或组件交互实现问题转交 `gxp-component-debug`。
+
+门禁成立时完整读取 `references/source-code-evidence.md`，然后只用其受限脚本和 `source_hints` 给出的层级、`exact_terms`、`paired_terms` 搜索。找不到结果时不得扩大到其他目录。源码只读，不默认构建、格式化或修改。
+
+输出时分层标记证据：`低代码`、`前端源码`、`后端源码`、`业务数据`、`页面运行`、`尚未验证`。静态源码命中不能写成运行验收通过。
+
 ## 精确排查流程
 
 1. 将用户原始输入完整传给 `diagnose_codex_input`；异常栈不要先改写。
@@ -72,6 +88,7 @@ description: Use this skill when the user asks to 排查或复核 GXP 低代码�
 6. 沿 `CallPublicAction`、`CallAction` 继续追踪，直到数据库读写、显式返回或首个异常点。
 7. 业务表先 `describe_table`，再 `get_records` 使用索引等值条件、小列集和小 `limit`。
 8. 用 `references/report-contract.md` 输出结论；不要省略定位字段或写“同上”。
+9. 只有命中“源码升级门禁”时，才按 `source_hints` 受限读取前端、后端或两端源码；否则明确写“低代码证据已足够，无需查源码”。
 
 ## 问题输出格式门禁
 
@@ -79,13 +96,13 @@ description: Use this skill when the user asks to 排查或复核 GXP 低代码�
 - 同一问题涉及多个动作、分组或节点时，依次写 `位置1`、`位置2`；每个位置都完整给出，不写“同上”。
 - 每个位置默认使用以下紧凑顺序：`动作：code／显示名称`、`RefId`、`分组：显示名称／group_key`、`画布行／索引`、`节点：node_key／显示名称`、`类型`、`当前`、`生成 C#`。
 - 位置之后按证据补充 `下游约束`、`只读数据`、`失败机制`、`修改`、`生命周期/保留项`、`验证状态`；没有对应证据的段落省略，不用空模板占位。
-- 岗位培训、周期培训及跨动作字段生命周期问题必须明确列出所有创建端、读取端、更新端和实际数据值；不能只报其中一个节点。
+- 跨动作字段生命周期问题必须明确列出所有创建端、读取端、更新端和实际数据值；不能只报其中一个节点。
 - `修改` 必须写成可执行的画布字段或条件变更；需要保留的状态字段和后续状态流转单独写明，避免修复首次创建时破坏后续生命周期。
 - 完整格式以 `references/report-contract.md` 为准。
 
 ## 交互分支命中门禁
 
-- 从用户实际操作还原运行输入。例如“未选择培训对象”和“点击成员组件后已有值”是互斥路径，不得共用一个修改结论。
+- 从用户实际操作还原运行输入。例如“未选择关联对象”和“触发选择组件后已有值”是互斥路径，不得共用一个修改结论。
 - 检查目标节点所在的所有父级 `IF/Else`，读取父条件完整 `paramsValue`，并同时检查同级另一分支直到各自的最终写库动作。
 - 给修改方案前必须证明三件事：用户操作满足该分支条件；该分支会执行目标节点；该分支最终写入了出现异常的表和字段。任一项缺失时写“未确认命中分支”，不得让用户修改。
 - 存在并行分支时，先输出简短分支对照：触发条件、用户本次命中路径、最终调用动作、最终写入字段。不得因为节点名称相近、字段相同或同在一个分组就默认是同一路径。
@@ -158,6 +175,7 @@ description: Use this skill when the user asks to 排查或复核 GXP 低代码�
 - 输出问题、保存复核、发布复核或异常结论前，完整读取 `references/report-contract.md`。
 - 需要连接已打开的 Chrome 页签取证时，完整读取 `references/runtime-browser-evidence.md`。
 - 排查下拉、`DataFilter`、无可选值、值被清空或后续过滤覆盖时，完整读取 `references/component-filter-audit.md`。
+- MCP 已产生组件、API、Controller、Service 或后端栈源码锚点，并且低代码证据不足时，完整读取 `references/source-code-evidence.md`。
 
 ## MCP 不可用时
 

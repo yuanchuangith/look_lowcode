@@ -7,6 +7,7 @@ from .config import ConfigurationError, default_config_path
 from .db import ReadOnlyDatabase
 from .diagnostics import DiagnosticEngine
 from .repository import GxpRepository
+from .source_hints import build_source_hints
 
 
 class GxpReadonlyService:
@@ -385,6 +386,11 @@ class GxpReadonlyService:
             result["field_evidence"] = field_evidence[:safe_max_nodes]
             result["field_match_count"] = len(field_evidence)
             result["field_evidence_truncated"] = len(field_evidence) > safe_max_nodes
+        result["source_hints"] = build_source_hints(
+            action=design.get("metadata"),
+            design=design,
+            nodes=limited_nodes,
+        )
         if csharp_line:
             result["generated_csharp"] = self.inspector.csharp_context(
                 str(design.get("csharp_code", "")), csharp_line, csharp_context
@@ -479,7 +485,7 @@ class GxpReadonlyService:
             )
         published = design.get("version") == "published"
         current_runtime_copy = published and not bool(design.get("is_deleted"))
-        return {
+        result = {
             "action": design.get("metadata"),
             "design": {
                 key: design.get(key)
@@ -512,6 +518,12 @@ class GxpReadonlyService:
             ),
             "generated_csharp_included": False,
         }
+        result["source_hints"] = build_source_hints(
+            action=design.get("metadata"),
+            design=design,
+            component_filters=filters,
+        )
+        return result
 
     def compare_designs(self, ref_id: str) -> dict[str, Any]:
         published = self.repository.load_design(

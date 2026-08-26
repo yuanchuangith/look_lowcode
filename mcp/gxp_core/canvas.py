@@ -115,6 +115,9 @@ def node_facts(node: dict[str, Any]) -> dict[str, Any]:
     input_params = params.get("inputParams", {}) or {}
     output_params = params.get("outputParams", {}) or {}
     facts: dict[str, Any] = {}
+    component = _component_identity(node)
+    if any(component.values()):
+        facts["component"] = component
     model = _model_name(input_params)
     if model:
         facts["model_or_table"] = model
@@ -200,6 +203,41 @@ def node_facts(node: dict[str, Any]) -> dict[str, Any]:
                 )
         if call_params:
             facts["call_parameters"] = call_params
+    api_routes: list[str] = []
+    service_symbols: list[str] = []
+
+    def collect_source_signals(value: Any, key: str = "") -> None:
+        if isinstance(value, dict):
+            for nested_key, nested_value in value.items():
+                collect_source_signals(nested_value, str(nested_key))
+            return
+        if isinstance(value, list):
+            for nested_value in value:
+                collect_source_signals(nested_value, key)
+            return
+        candidate = _compact(value)
+        if not candidate or len(candidate) > 200:
+            return
+        normalized_key = key.lower().replace("_", "")
+        if normalized_key in {"url", "requesturl", "apiurl", "endpoint", "route", "path"}:
+            if candidate.startswith("/") or "/api/" in candidate.lower():
+                api_routes.append(candidate)
+        if normalized_key in {
+            "service",
+            "servicename",
+            "controller",
+            "controllername",
+            "classname",
+            "methodname",
+        }:
+            if re.search(r"(?:Service|ServiceBase|Controller)(?:\.[A-Za-z_]\w*)?$", candidate):
+                service_symbols.append(candidate)
+
+    collect_source_signals(input_params)
+    if api_routes:
+        facts["api_routes"] = list(dict.fromkeys(api_routes))[:8]
+    if service_symbols:
+        facts["service_symbols"] = list(dict.fromkeys(service_symbols))[:8]
     return {key: value for key, value in facts.items() if value not in (None, "", [], {})}
 
 

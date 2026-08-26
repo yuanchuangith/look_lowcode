@@ -1,4 +1,4 @@
 interface:
   display_name: "GXP 低代码精确排查"
   short_description: "只读定位动作副本、画布节点、字段映射、C# 与历史异常证据"
-  default_prompt: "使用 $gxp-lowcode-debug 先锁定当前现象、期望规则和无匹配行为，再复用会话锚点做紧凑只读检查；先读定位与 facts，缩小后才读取参数或生成 C#。"
+  default_prompt: "使用 $gxp-lowcode-debug 先锁定当前现象、期望规则和无匹配行为，再复用会话锚点做紧凑只读检查；先用 MCP 定位，只有 source_hints 给出组件或后端源码锚点且低代码证据不足时，才按需只读固定源码仓库，不默认构建或修改。"

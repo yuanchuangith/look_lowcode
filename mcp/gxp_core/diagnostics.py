@@ -6,6 +6,7 @@ from typing import Any
 
 from .canvas import CanvasInspector
 from .repository import GxpRepository
+from .source_hints import build_source_hints
 
 
 STACK_FRAME = re.compile(
@@ -16,9 +17,19 @@ STACK_FRAME = re.compile(
 QUOTED_IDENTIFIER = re.compile(r"[\"']([A-Za-z0-9][A-Za-z0-9_-]{5,127})[\"']")
 ACTION_TOKEN = re.compile(r"\b[A-Za-z0-9][A-Za-z0-9_-]{5,127}\b")
 TABLE_TOKEN = re.compile(r"\bgxp_[A-Za-z0-9_]+\b", re.IGNORECASE)
-PAGE_SEMANTICS = re.compile(r"(?:页面|流程|申请|修订|变更|岗位矩阵|培训矩阵|岗位培训)")
+PAGE_OPERATIONS = ("申请", "修订", "变更", "废除", "审批", "新建", "编辑", "详情", "列表")
+PAGE_SEMANTICS = re.compile(
+    rf"(?:页面|流程|{'|'.join(PAGE_OPERATIONS)})"
+)
 PAGE_NAME_PATTERN = re.compile(
-    r"(?:岗位|培训)(?:矩阵|培训)(?:申请|修订|变更)(?:流程|页面)?"
+    rf"(?P<name>[\u4e00-\u9fffA-Za-z0-9_-]{{2,48}}?"
+    rf"(?:(?:{'|'.join(PAGE_OPERATIONS)})(?:流程|页面)?|(?:流程|页面)))"
+)
+PAGE_SEGMENT_SPLIT = re.compile(r"[\n\r，,。；;！!？?、：:]+")
+PAGE_LEADING_CUES = re.compile(
+    r"^(?:(?:当前现象|期望规则|请|需要|麻烦|帮忙|先|再|然后|并|"
+    r"同时|以及|还有|和|与|在|进入|打开|检查|查看|排查|定位|"
+    r"确认|针对|这个|这些|对应|目标)[\s]*)+"
 )
 ACTION_NAME_PREFIX = re.compile(
     r"(?:公共动作|表单动作|动作)[：:\s]*[“\"']?"
@@ -44,13 +55,38 @@ def action_name_queries(text: str) -> list[str]:
 
 
 def page_name_queries(text: str) -> list[str]:
-    text = text or ""
-    candidates = PAGE_NAME_PATTERN.findall(text)
-    for prefix in ("岗位矩阵", "培训矩阵", "岗位培训"):
-        if re.search(rf"{prefix}申请\s*[/／、]\s*修订", text):
-            apply_name = f"{prefix}申请"
-            insert_at = candidates.index(apply_name) + 1 if apply_name in candidates else 0
-            candidates.insert(insert_at, f"{prefix}修订")
+    candidates: list[str] = []
+    for raw_segment in PAGE_SEGMENT_SPLIT.split(text or ""):
+        segment = PAGE_LEADING_CUES.sub("", raw_segment.strip())
+        if not segment:
+            continue
+        for match in PAGE_NAME_PATTERN.finditer(segment):
+            candidate = match.group("name").strip()
+            if len(candidate) < 2:
+                continue
+            candidates.append(candidate)
+            operation = next(
+                (term for term in PAGE_OPERATIONS if candidate.endswith(term)),
+                "",
+            )
+            if not operation:
+                operation = next(
+                    (
+                        term
+                        for term in PAGE_OPERATIONS
+                        if candidate.endswith(f"{term}流程")
+                        or candidate.endswith(f"{term}页面")
+                    ),
+                    "",
+                )
+            shorthand = re.match(
+                rf"\s*[/／]\s*(?P<operation>{'|'.join(PAGE_OPERATIONS)})",
+                segment[match.end() :],
+            )
+            if shorthand and operation:
+                base = re.sub(r"(?:流程|页面)$", "", candidate)
+                base = base[: -len(operation)]
+                candidates.append(f"{base}{shorthand.group('operation')}")
     return list(dict.fromkeys(candidates))[:5]
 
 
@@ -464,7 +500,7 @@ class DiagnosticEngine:
                     "current_published_vs_draft": current_compare,
                 }
             )
-        return {
+        result = {
             "parsed": parsed,
             "at_time": at_time,
             "actions": action_results,
@@ -475,6 +511,25 @@ class DiagnosticEngine:
             ),
             "draft_edits_affect_runtime": False,
         }
+        hint_action = action_results[0].get("action") if len(action_results) == 1 else None
+        hint_design = None
+        hint_nodes: list[dict[str, Any]] = []
+        if len(action_results) == 1:
+            candidates = action_results[0].get("runtime_published_candidates") or []
+            if candidates:
+                candidate = candidates[0]
+                hint_design = {
+                    "design_id": candidate.get("design_id"),
+                    "version": candidate.get("version"),
+                }
+                hint_nodes = list(candidate.get("matching_canvas_nodes") or [])[:20]
+        result["source_hints"] = build_source_hints(
+            action=hint_action,
+            design=hint_design,
+            nodes=hint_nodes,
+            text=text,
+        )
+        return result
 
     def diagnose_codex_input(self, text: str, *, at_time: str | None = None) -> dict[str, Any]:
         text = (text or "").strip()
@@ -482,9 +537,11 @@ class DiagnosticEngine:
             raise ValueError("Codex input cannot be empty")
         parsed = parse_dynamic_exception(text)
         if parsed.get("matched"):
+            diagnosis = self.trace_dynamic_exception(text, at_time=at_time)
             return {
                 "input_kind": "dynamic_exception",
-                "diagnosis": self.trace_dynamic_exception(text, at_time=at_time),
+                "diagnosis": diagnosis,
+                "source_hints": diagnosis.get("source_hints", build_source_hints(text=text)),
                 "next_tools": [
                     "inspect_action",
                     "get_records",
@@ -548,7 +605,7 @@ class DiagnosticEngine:
                 )
             except Exception:
                 design_text_matches = []
-        return {
+        result = {
             "input_kind": "natural_language",
             "resolved_actions": actions,
             "mentioned_tables": tables,
@@ -595,6 +652,11 @@ class DiagnosticEngine:
                 else ""
             ),
         }
+        result["source_hints"] = build_source_hints(
+            action=actions[0] if len(actions) == 1 else None,
+            text=text,
+        )
+        return result
 
     def evaluate_node_predicate(
         self,

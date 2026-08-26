@@ -39,6 +39,9 @@ def _chinese_bigrams(value: str) -> set[str]:
     return {text[index : index + 2] for index in range(len(text) - 1)}
 
 
+PAGE_OPERATION_TERMS = ("申请", "修订", "变更", "废除", "审批", "新建", "编辑", "详情", "列表")
+
+
 def _page_similarity(query: str, display_name: str) -> float:
     query_terms = _chinese_bigrams(query)
     page_terms = _chinese_bigrams(
@@ -49,12 +52,11 @@ def _page_similarity(query: str, display_name: str) -> float:
     score = (2.0 * len(query_terms & page_terms)) / (
         len(query_terms) + len(page_terms)
     )
-    for operation in ("申请", "修订", "变更", "废除"):
-        if operation not in query:
-            continue
-        score += 0.35 if operation in display_name else -0.3
-    if "矩阵" in query and "矩阵" in display_name:
-        score += 0.05
+    query_operations = {term for term in PAGE_OPERATION_TERMS if term in query}
+    page_operations = {term for term in PAGE_OPERATION_TERMS if term in display_name}
+    if query_operations:
+        overlap = query_operations & page_operations
+        score += 0.35 * (len(overlap) / len(query_operations)) if overlap else -0.3
     if display_name.endswith("流程"):
         score += 0.05
     return max(0.0, min(score, 1.0))

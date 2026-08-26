@@ -28,12 +28,13 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("会话锚点", skill)
         self.assertIn("include_generated_csharp=false", skill)
 
-    def test_component_filter_reference_encodes_golden_business_rule(self) -> None:
+    def test_component_filter_reference_is_driven_by_current_user_rule(self) -> None:
         reference = (
             SKILL_ROOT / "references" / "component-filter-audit.md"
         ).read_text(encoding="utf-8")
-        self.assertIn("file_id 且 file_version", reference)
-        self.assertIn("空集合，下拉不可选择", reference)
+        self.assertIn("用户本次确认的业务不变量", reference)
+        self.assertIn("不得预设字段名或字段组合", reference)
+        self.assertIn("全部约束字段", reference)
         self.assertIn("全部 writers", reference)
         self.assertIn("累计小于 120 KB", reference)
 
@@ -41,6 +42,18 @@ class SkillContractTests(unittest.TestCase):
         prompt = (SKILL_ROOT / "agents" / "openai.yaml").read_text(encoding="utf-8")
         self.assertIn("锁定当前现象、期望规则和无匹配行为", prompt)
         self.assertIn("紧凑只读检查", prompt)
+
+    def test_source_escalation_is_hit_driven_and_bounded(self) -> None:
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        reference = (SKILL_ROOT / "references" / "source-code-evidence.md").read_text(encoding="utf-8")
+        script = SKILL_ROOT / "scripts" / "search_source_evidence.py"
+        for term in ("组件实现", "请求参数", "API", "Controller", "Service", "source_hints"):
+            self.assertIn(term, skill)
+        self.assertIn("低代码证据已足够，无需查源码", skill)
+        self.assertIn(r"G:\hoyi\updateComponents\gxp2.components", reference)
+        self.assertIn(r"G:\hoyi\updateWeb\gxp2.web", reference)
+        self.assertIn("32 KB", reference)
+        self.assertTrue(script.is_file())
 
 
 if __name__ == "__main__":

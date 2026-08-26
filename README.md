@@ -10,6 +10,17 @@ GXP 低代码只读诊断 MCP。stdio 与 Streamable HTTP 共用同一个 `creat
 
 `inspect_action` 默认 `include_generated_csharp=false`，新增 `max_nodes=20`。传入 `terms` 不再隐式搜索生成 C#；旧调用方必须显式传 `include_generated_csharp=true`。精确 `csharp_line` 不受该默认值影响。节点超过 `max_nodes`、生成 C# 超过 20 处或完整参数命中超过 10 个节点时，响应返回截断/缩小范围元数据。
 
+## 命中驱动源码排查
+
+`diagnose_codex_input`、`inspect_action`、`inspect_component_filters` 和 `trace_dynamic_exception` 会增量返回不超过 4 KB 的 `source_hints`。它只包含动作、设计、组件、API、Service/Controller、精确词和组合词等逻辑锚点，不读取本机源码，也不会绕过生成 C# 的显式开关。
+
+- 组件身份建议前端层；普通字段名或表名不会单独触发源码扫描。
+- API Route、Service/Controller 或真实 `GxP2.*` 后端栈建议后端层。
+- `CallAction`/`CallPublicAction` 只建议继续追踪低代码动作。
+- 动态生成类名不会进入本地源码关键词。
+
+Skill 仅在低代码证据不足且 `source_hints.candidate_layers` 非空时调用 `skills/gxp-lowcode-debug/scripts/search_source_evidence.py`。脚本固定只读 `G:\hoyi\updateComponents\gxp2.components` 与 `G:\hoyi\updateWeb\gxp2.web`，使用 `rg` 搜索，排除依赖、构建、缓存和生成目录；最多返回 20 个文件、前 5 个文件上下文，JSON 不超过 32 KB。它不联网、不构建、不修改文件，也不会在无命中时扩大目录。
+
 ## 运行方式
 
 ### 本地 stdio
