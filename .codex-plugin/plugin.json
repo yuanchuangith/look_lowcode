@@ -1,0 +1,22 @@
+{
+  "name": "gxp-lowcode-readonly",
+  "version": "0.3.0+codex.20260826014035",
+  "description": "Read-only GXP low-code diagnostics with compact page/action resolution, all-writer component filter audits, bounded canvas inspection, history-aware exception tracing, and guarded SQL.",
+  "author": {
+    "name": "Local developer"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "GXP \u4f4e\u4ee3\u7801\u53ea\u8bfb\u6392\u67e5",
+    "shortDescription": "\u7cbe\u786e\u5b9a\u4f4d\u52a8\u4f5c\u526f\u672c\u3001\u753b\u5e03\u8282\u70b9\u3001\u5b57\u6bb5\u3001\u751f\u6210 C# \u548c\u5386\u53f2\u5f02\u5e38\u3002",
+    "longDescription": "\u901a\u8fc7\u7ed3\u6784\u5316 MCP \u5de5\u5177\u548c\u53d7\u63a7\u53ea\u8bfb SQL \u6392\u67e5 GXP \u516c\u5171\u52a8\u4f5c\u3001\u8868\u5355\u52a8\u4f5c\u548c\u52a8\u6001\u5f02\u5e38\uff1b\u660e\u786e\u8349\u7a3f\u662f\u53ef\u7f16\u8f91\u526f\u672c\u3001\u53d1\u5e03\u662f\u8fd0\u884c\u526f\u672c\uff0c\u5e76\u8f93\u51fa\u52a8\u4f5c\u8eab\u4efd\u3001\u753b\u5e03\u884c/\u7d22\u5f15\u3001\u8282\u70b9 Key\u3001\u5b57\u6bb5\u8bc1\u636e\u3001\u751f\u6210 C# \u5750\u6807\u4e0e\u5386\u53f2\u53d1\u5e03\u5feb\u7167\u3002",
+    "developerName": "Local developer",
+    "category": "Productivity",
+    "capabilities": [
+      "Skills",
+      "MCP"
+    ],
+    "defaultPrompt": "\u4f7f\u7528 $gxp-lowcode-debug \u53ea\u8bfb\u6392\u67e5\u95ee\u9898\uff0c\u5148\u786e\u8ba4\u540c\u4e00\u52a8\u4f5c\u7684\u8349\u7a3f/\u53d1\u5e03\u526f\u672c\u548c\u8fd0\u884c\u526f\u672c\uff0c\u518d\u8f93\u51fa\u52a8\u4f5c\u8eab\u4efd\u3001\u7cbe\u786e\u753b\u5e03\u8282\u70b9\u3001\u5b57\u6bb5\u6620\u5c04\u3001\u751f\u6210 C# \u884c\u3001\u53ea\u8bfb\u8bc1\u636e\u548c\u753b\u5e03\u4fee\u6539\u65b9\u6848\u3002"
+  },
+  "mcpServers": "./.mcp.json"
+}

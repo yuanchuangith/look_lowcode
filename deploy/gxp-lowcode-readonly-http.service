@@ -1,0 +1,30 @@
+[Unit]
+Description=GXP low-code read-only MCP over Streamable HTTP
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/gxp-lowcode-readonly/mcp
+Environment=PYTHONUNBUFFERED=1
+Environment=GXP_LOWCODE_CONFIG=/home/ubuntu/gxp-lowcode-readonly/database.json
+Environment=GXP_LOWCODE_DB_PASSWORD_FILE=%d/db-password
+LoadCredential=db-password:/etc/gxp-lowcode-readonly/db-password
+ExecStart=/home/ubuntu/gxp-lowcode-readonly/.venv/bin/python /home/ubuntu/gxp-lowcode-readonly/mcp/http_server.py
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target
