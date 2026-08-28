@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -17,8 +18,14 @@ def default_config_path() -> Path:
     configured = os.environ.get("GXP_LOWCODE_CONFIG")
     if configured:
         return Path(configured).expanduser().resolve()
-    app_data = os.environ.get("APPDATA")
-    base = Path(app_data) if app_data else Path.home() / ".config"
+    if os.name == "nt":
+        app_data = os.environ.get("APPDATA")
+        base = Path(app_data) if app_data else Path.home() / "AppData" / "Roaming"
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support"
+    else:
+        xdg_config = os.environ.get("XDG_CONFIG_HOME")
+        base = Path(xdg_config).expanduser() if xdg_config else Path.home() / ".config"
     return base / "GxpLowcodeReadonly" / "database.json"
 
 
@@ -119,8 +126,8 @@ def load_password(config: DatabaseConfig) -> str:
     password = keyring.get_password(config.credential_target, config.user)
     if not password:
         raise ConfigurationError(
-            "No database password is stored in Windows Credential Manager. "
-            "Run scripts/configure_connection.ps1 first."
+            "No database password is stored in the operating-system credential store. "
+            "Run the platform-specific configure_connection script first."
         )
     return password
 

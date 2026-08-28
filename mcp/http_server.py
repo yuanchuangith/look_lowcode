@@ -36,6 +36,7 @@ def create_http_app(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> ASGIA
         allowed_origins=ALLOWED_ORIGINS,
     )
     mcp = create_mcp(
+        include_local_cpm=False,
         host=host,
         port=port,
         streamable_http_path="/mcp",

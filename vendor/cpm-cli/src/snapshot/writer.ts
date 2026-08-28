@@ -62,7 +62,7 @@ export async function writeSnapshot(outDir, data) {
     const deletedPages = {};
     for (const p of data.pages) {
         if (p.deleted)
-            deletedPages[p.summary.route] = p.summary.id;
+            deletedPages[p.summary.route] = p.summary.outId || p.summary.id;
     }
     // 健康度：counts 只是清单数量（488=平台有 488 页），health 区分本次成功/降级沿用/平台已删
     const health = {
@@ -190,7 +190,7 @@ function writePages(w, outDir, data, processDirOf, diskMetadata) {
             .filter(([, v]) => isMissing(v)).map(([k]) => k);
         // 流程↔页面反向关联：流程 meta.pcPageKey = 页面 OutId（实测 2026-08-25，非 route）
         const processFlows = data.processes
-            .filter(p => p.row.pcPageKey === page.summary.id)
+            .filter(p => p.row.pcPageKey === (page.summary.outId || page.summary.id))
             .map(p => ({
             id: p.id, name: p.name, dir: processDirOf.get(p.id) ?? '',
             version: p.row.actReProcdefIdRev,
@@ -264,7 +264,8 @@ function writePageBizflows(w, dir, page) {
 /** 导航层：indexes 四件 + 顶层 README（manifest 由 writeSnapshot 主流程在 finalize 后写） */
 function writeNavigation(w, outDir, data, pagesMeta) {
     const idx = join(outDir, 'indexes');
-    if (pagesMeta.degraded.length > 0 && pagesMeta.metadata.length < data.pages.length) {
+    const expectedPages = data.pages.filter(page => !page.deleted).length;
+    if (pagesMeta.degraded.length > 0 && pagesMeta.metadata.length < expectedPages) {
         // 索引守卫：降级页缺席会使索引退化为仅含成功页（如 488 页只剩 5 页），与 keep 的旧页面
         // 数据不一致——keep 旧索引，下次全部成功拉取时自然重建；README 不依赖页面数据照常写
         w.keepDirDeep(idx);

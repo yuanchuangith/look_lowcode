@@ -11,6 +11,13 @@ if str(MCP_DIR) not in sys.path:
 from mcp.server.fastmcp import FastMCP
 
 from gxp_core.service import GxpReadonlyService
+from gxp_core.cpm_snapshot import (
+    cpm_snapshot_status,
+    refresh_cpm_snapshot,
+    search_platform_snapshot,
+    inspect_page_snapshot,
+    get_cpm_knowledge,
+)
 
 
 def service() -> GxpReadonlyService:
@@ -211,8 +218,16 @@ MCP_TOOLS = (
     readonly_sql,
 )
 
+LOCAL_CPM_TOOLS = (
+    cpm_snapshot_status,
+    refresh_cpm_snapshot,
+    search_platform_snapshot,
+    inspect_page_snapshot,
+    get_cpm_knowledge,
+)
 
-def create_mcp(**settings: Any) -> FastMCP:
+
+def create_mcp(*, include_local_cpm: bool = True, **settings: Any) -> FastMCP:
     """Create one transport-specific MCP instance over the shared read-only tools."""
     app = FastMCP(
         "gxp-lowcode-readonly",
@@ -227,6 +242,9 @@ def create_mcp(**settings: Any) -> FastMCP:
     )
     for tool in MCP_TOOLS:
         app.tool()(tool)
+    if include_local_cpm:
+        for tool in LOCAL_CPM_TOOLS:
+            app.tool()(tool)
     return app
 
 

@@ -68,13 +68,12 @@ export function loadPageMetadata(outDir: string) {
     return { metadata, errors };
 }
 
-function identityValues(value: any): string[] {
-    return [value?.route, value?.id, value?.outId].filter((v): v is string => typeof v === 'string' && v.length > 0);
-}
-
 export function samePage(a: any, b: any): boolean {
-    const av = new Set(identityValues(a));
-    return identityValues(b).some(v => av.has(v));
+    return Boolean(
+        (a?.outId && b?.outId && a.outId === b.outId)
+        || (a?.id && b?.id && a.id === b.id)
+        || (a?.route && b?.route && a.route === b.route),
+    );
 }
 
 export function assertPartialBaseline(outDir: string, pageCatalog: any[]) {

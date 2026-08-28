@@ -12,6 +12,7 @@ import { translateAll, translateTitles, translateDicts, recoverLanguageRows } fr
 import { loadPrevProcessVersions, loadPrevDeletedPages } from './process-incremental.js';
 import { summarizeChanges } from '../snapshot/incremental.js';
 import { Semaphore } from './async-pool.js';
+import { assertPartialBaseline, PartialBaselineError } from '../snapshot/page-meta.js';
 /** 全局并发默认上限（性能计划：全进程平台请求经同一 Semaphore 闸门压到此值） */
 export const DEFAULT_CONCURRENCY = 10;
 /** 阶段计时包装：fn 完成后把耗时（ms）记入 timings[name] */
@@ -24,17 +25,7 @@ async function resolveToken(cwd, url) {
     const cached = loadTokenCache(cwd);
     if (cached?.token)
         return cached.token;
-    let creds;
-    try {
-        creds = resolveCredentials(cwd, undefined);
-    }
-    catch (e) {
-        if (e instanceof CredentialsMissingError) {
-            console.log(e.message);
-            process.exit(1);
-        }
-        throw e;
-    }
+    const creds = resolveCredentials(cwd, undefined);
     const { token } = await platformLogin(`${url}/gxp2`, creds);
     saveTokenCache(cwd, { token, obtainedAt: new Date().toISOString() });
     return token;
@@ -47,7 +38,7 @@ async function resolveToken(cwd, url) {
  */ async function fetchPage(ctx, prefix, appId, siteOutId, p, failures, gate, prevDeleted) {
     // 上次已判死的僵尸条目（route+id 双命中）：零请求直接标记 deleted；
     // 同 route 换 id（平台重建页面）不命中，照常拉取
-    if (prevDeleted[p.route] === p.id) {
+    if (prevDeleted[p.route] === (p.outId || p.id)) {
         return {
             summary: p, pageSchema: null, deleted: true,
             flows: [], translations: new Map(),
@@ -101,46 +92,81 @@ async function fetchPages(ctx, prefix, appId, siteOutId, routes, failures, gate,
     });
     return pages;
 }
-export async function runPull(opts) {
-    const projectDir = resolveProjectDir(opts);
-    // --out 模式的指引后缀：错误提示里的 cpm login 命令拼上 --out <目录>，AI 可直接照抄执行
-    const outHint = opts.out ? ` --out ${opts.out}` : '';
-    const config = loadConfig(projectDir);
-    if (!config) {
-        console.log(`ERROR: 尚未绑定平台。请先执行 cpm login${outHint} --url <平台地址> --account <账号> --password <密码>`);
-        process.exit(1);
+export class PullError extends Error {
+    code;
+    details;
+    constructor(code, message, details = undefined) {
+        super(message);
+        this.name = 'PullError';
+        this.code = code;
+        this.details = details;
     }
+}
+function pullErrorOf(error) {
+    if (error instanceof PullError)
+        return error;
+    if (error instanceof PartialBaselineError)
+        return new PullError(error.code, error.message, error.details);
+    if (error instanceof CredentialsMissingError)
+        return new PullError('AUTH_REQUIRED', '未提供平台凭据，且本地 token 不存在。');
+    if (error instanceof ServiceUnavailableError && (error.status === 401 || error.status === 403))
+        return new PullError('AUTH_EXPIRED', '平台 token 无效或已过期。');
+    return new PullError('PULL_FAILED', String(error?.message ?? error));
+}
+function errorEnvelope(mode, page, startedAt, error) {
+    return {
+        ok: false,
+        mode,
+        page: page ?? null,
+        counts: {},
+        changes: { added: 0, updated: 0, removed: 0, removedPaths: [] },
+        failures: [],
+        health: null,
+        durationMs: Date.now() - startedAt,
+        error: { code: error.code, message: error.message, ...(error.details ? { details: error.details } : {}) },
+    };
+}
+function emitError(opts, envelope) {
+    if (opts.json)
+        console.log(JSON.stringify(envelope));
+    else
+        console.log(`ERROR [${envelope.error.code}]: ${envelope.error.message}`);
+    process.exitCode = 1;
+    return envelope;
+}
+async function pull(opts, startedAt) {
+    const projectDir = resolveProjectDir(opts);
+    const config = loadConfig(projectDir);
+    if (!config)
+        throw new PullError('CONFIG_REQUIRED', '尚未绑定平台，请先执行 cpm login。');
     // 并发上限校验：非法值在任何网络请求前拒绝（进程闸门构造前提）
     const concurrency = opts.concurrency ?? DEFAULT_CONCURRENCY;
-    if (!Number.isInteger(concurrency) || concurrency < 1) {
-        console.log('ERROR: --concurrency 需为正整数。请检查参数，例如 --concurrency 10。');
-        process.exit(1);
-    }
-    let token;
-    try {
-        token = await resolveToken(projectDir, config.url);
-    }
-    catch (e) {
-        console.log(`ERROR: 登录失败：${e.message}。请执行 cpm login${outHint} --account <账号> --password <密码>`);
-        process.exit(1);
-    }
+    if (!Number.isInteger(concurrency) || concurrency < 1)
+        throw new PullError('INVALID_ARGUMENT', '--concurrency 需为正整数。');
+    const token = await resolveToken(projectDir, config.url);
     const ctx = {
         baseUrl: config.url, cookie: buildCookie(token, config.companyId, config.orgIdentityId),
         appId: config.appId, siteOutId: config.siteOutId,
     };
     const failures = [];
-    try {
+    {
         // 流程版本增量前提：先算输出目录并读上次版本表（无 manifest / 损坏视为首次全量）
         const outDir = projectDir; // 平铺式项目根即快照根（旧 cpm-snapshot/ 嵌套布局废弃，finalize 自然清理）
         const prevVersions = loadPrevProcessVersions(outDir);
         const prevDeleted = loadPrevDeletedPages(outDir);
-        let pages = await getPageList(ctx, config.apiPrefix, config.appId, config.siteOutId);
+        const pageCatalog = await getPageList(ctx, config.apiPrefix, config.appId, config.siteOutId);
+        let pages = pageCatalog;
+        let targetPage = null;
+        let baselineMetadata = undefined;
         if (opts.page) {
-            pages = pages.filter(p => p.route === opts.page || p.id === opts.page);
-            if (pages.length === 0) {
-                console.log(`ERROR: 未找到页面 ${opts.page}。请核对 --page 参数（route 或页面 ID），或去掉 --page 全量拉取。`);
-                process.exit(1);
-            }
+            pages = pageCatalog.filter(p => p.route === opts.page || p.id === opts.page || p.outId === opts.page);
+            if (pages.length === 0)
+                throw new PullError('PAGE_NOT_FOUND', `未找到页面 ${opts.page}。`);
+            if (pages.length > 1)
+                throw new PullError('PAGE_AMBIGUOUS', `页面标识 ${opts.page} 命中多个页面，请改用唯一的 route/Id/OutId。`);
+            targetPage = pages[0];
+            // 在任何快照写入前证明旧快照具备全部页面元数据；旧 0.3.0 快照必须先全量升级。
+            baselineMetadata = assertPartialBaseline(outDir, pageCatalog);
         }
         // 双链并行编排（性能计划）：页面链与共享链无数据依赖；
         // 全部平台请求（含共享列表与翻译批量）经同一 gate，全程并发恒 ≤ concurrency。
@@ -154,6 +180,12 @@ export async function runPull(opts) {
         const sharedP = timed(timings, 'shared', () => fetchSharedChain(ctx, config.apiPrefix, config.appId, failures, gate, prevVersions));
         const pagesP = timed(timings, 'pages', () => fetchPages(ctx, config.apiPrefix, config.appId, config.siteOutId, pages, failures, gate, prevDeleted));
         const [pageDataRaw, shared] = await Promise.all([pagesP, sharedP]);
+        if (opts.page) {
+            const target = pageDataRaw[0];
+            if (!target || target.deleted || target.degradedReason) {
+                throw new PullError('PAGE_REFRESH_DEGRADED', `页面 ${opts.page} 本次未完整拉取，旧快照保持不变。`, target?.degradedReason ? [target.degradedReason] : undefined);
+            }
+        }
         // languages 降级恢复：本次空且磁盘旧快照有 zh-cn.json → 重建翻译源（防下游译文漂移到兜底）；
         // 落盘仍传空数组，由 writer 守卫保留全语种旧文件
         const languagesEmpty = Array.isArray(shared.languages) && shared.languages.length === 0;
@@ -176,18 +208,32 @@ export async function runPull(opts) {
         const report = await timed(timings, 'write', () => writeSnapshot(outDir, {
             ...shared, pages: pageData, menuTranslations, dictionaries,
             platform: { url: config.url, appId: config.appId },
-            failures,
+            failures, mode: opts.page ? 'page' : 'full', baselineMetadata,
         }));
-        Object.assign(report, { durationMs: Date.now() - t0, stageTimings: timings });
+        const envelope = {
+            ok: true,
+            mode: opts.page ? 'page' : 'full',
+            page: targetPage ? {
+                route: targetPage.route, id: targetPage.id, outId: targetPage.outId, name: targetPage.name,
+            } : null,
+            counts: report.counts,
+            changes: report.changes,
+            failures: report.failures,
+            health: report.health,
+            durationMs: Date.now() - t0,
+            error: null,
+            outDir: report.outDir,
+            stageTimings: timings,
+        };
         if (opts.json) {
-            console.log(JSON.stringify(report));
+            console.log(JSON.stringify(envelope));
         }
         else {
-            const counts = Object.entries(report.counts).map(([k, v]) => `${k}=${v}`).join(' ');
+            const counts = Object.entries(envelope.counts).map(([k, v]) => `${k}=${v}`).join(' ');
             const stages = Object.entries(timings).map(([k, v]) => `${k} ${(Number(v) / 1000).toFixed(1)}s`).join(' / ');
-            console.log(`拉取完成：${counts}${failures.length ? `，失败 ${failures.length} 项` : ''}（耗时 ${(report.durationMs / 1000).toFixed(1)}s：${stages}）`);
+            console.log(`拉取完成：${counts}${failures.length ? `，失败 ${failures.length} 项` : ''}（耗时 ${(envelope.durationMs / 1000).toFixed(1)}s：${stages}）`);
             // 健康度行（有降级/已删时显示）：AI 一眼看出快照有多少数据非本次新鲜拉取及原因
-            const ph = report.health?.pages;
+            const ph = envelope.health?.pages;
             if (ph && (ph.degraded > 0 || (ph.deleted ?? 0) > 0)) {
                 const parts = [`数据健康：pages 本次成功 ${ph.ok}/${ph.total}`];
                 if (ph.degraded > 0) {
@@ -199,23 +245,26 @@ export async function runPull(opts) {
                 console.log(parts.join('；'));
             }
             // 增量变化摘要：AI 据此判断平台侧改了什么（git diff 同样只显示变化文件）
-            console.log(summarizeChanges(report.changes));
+            console.log(summarizeChanges(envelope.changes));
             for (const f of failures)
                 console.log(`  失败 [${f.type}] ${f.id}: ${f.reason}`);
-            if (report.changes.removedPaths.length > 0) {
-                const sample = report.changes.removedPaths.slice(0, 10).join('、');
-                console.log(`  删除清单（前 10）：${sample}${report.changes.removedPaths.length > 10 ? ' …' : ''}`);
+            if (envelope.changes.removedPaths.length > 0) {
+                const sample = envelope.changes.removedPaths.slice(0, 10).join('、');
+                console.log(`  删除清单（前 10）：${sample}${envelope.changes.removedPaths.length > 10 ? ' …' : ''}`);
             }
             console.log(`AI 下一步：读 ${outDir.replace(/\\/g, '/')}/indexes/pages.md 定位页面`);
         }
-        return report;
+        return envelope;
     }
-    catch (e) {
-        if (e instanceof ServiceUnavailableError && (e.status === 401 || e.status === 403)) {
-            console.log(`ERROR: token 无效或已过期。请向用户索要平台账号密码后执行 cpm login${outHint} --url ${config.url} --account <账号> --password <密码>`);
-            process.exit(1);
-        }
-        throw e;
+}
+export async function runPull(opts) {
+    const startedAt = Date.now();
+    const mode = opts.page ? 'page' : 'full';
+    try {
+        return await pull(opts, startedAt);
+    }
+    catch (error) {
+        return emitError(opts, errorEnvelope(mode, opts.page ?? null, startedAt, pullErrorOf(error)));
     }
 }
 //# sourceMappingURL=pull.js.map

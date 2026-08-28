@@ -1,5 +1,7 @@
 # cpm CLI
 
+当前恢复源码版本：`0.3.1`。`src/` 是可维护源，`dist/` 是随 Look 一并提交的 NodeNext ESM 构建产物。
+
 CPM 低代码平台的 AI 配套 CLI：把平台配置（页面 Schema、业务规则代码、模型字段、字典/数据集等）全量拉取物化为**自包含的项目目录**——快照平铺于项目根，`.cpm/` 缓存与 `skills/cpm-platform/` 技能同在其中，拷走这个目录即可在任意机器/AI 宿主上工作（**增量写入**：内容不变不重写，git diff/mtime 只反映平台真实变化）。
 
 **第一用户是 AI Agent**（不是人类开发者）：输出机器可读（`--json`）、错误信息自带下一步指引、命令 `--help` 自解释。
@@ -26,7 +28,7 @@ npm run cpm -- whoami
 # 3. 拉取快照（全量请求 + 增量写入）
 npm run cpm -- pull                # 人类可读摘要（含本次变化与各阶段耗时）
 npm run cpm -- pull --json         # 机器可读（counts/changes/failures/durationMs/stageTimings）
-npm run cpm -- pull --page <路由>  # 单页刷新
+npm run cpm -- pull --page <路由>  # 安全单页刷新（要求已有 0.3.1 全量基线）
 npm run cpm -- pull --concurrency 15  # 全局并发上限（缺省 10；网关压力大时调低）
 
 # --out <目录>：指定项目目录（绑定、缓存、快照、skills 全在其中，拷走即用；缺省当前目录）
@@ -36,7 +38,9 @@ npm run cpm -- pull --concurrency 15  # 全局并发上限（缺省 10；网关�
 # 入口：项目目录下 indexes/pages.md（路由 → 目录的权威映射表）
 ```
 
-升级 cpm-cli 后首次 pull 可能出现一次性格式对齐变化（changes.updated 偏大），二次起恢复零变化，属预期。流程设计按 manifest 的 processVersions 版本表增量跳过（版本未变不重拉 BPMN/节点配置）。
+升级 cpm-cli 后先执行一次全量 pull，为每页生成 `page-meta.json`。之后单页 pull 只替换目标页面，非目标页面和规则深层保留，页面改名完成写入后才清理旧目录，并从全部页面元数据重建四个全局索引。旧快照缺少元数据时返回 `PARTIAL_BASELINE_REQUIRED`，不会写出半份快照。
+
+`pull --json` 固定返回 `ok`、`mode`、`page`、`counts`、`changes`、`failures`、`health`、`durationMs` 和 `error.code`；认证、参数、目标页面和基线错误同时设置非零退出码。
 
 绑定信息存**项目目录**的 `.cpm/`（`config.json` 可提交 git）；凭据优先环境变量 `CPM_ACCOUNT`/`CPM_PASSWORD`，其次项目目录 `.cpm/credentials.json`（自动 gitignore）；token 缓存 `.cpm/token.json`（自动 gitignore）。项目目录 = `--out` 指定目录（缺省当前目录）。
 
@@ -62,7 +66,7 @@ D:/apps/qms/                # 项目目录（cpm pull --out D:/apps/qms，或 cd
 ├── manifest.json           # 内容最后变化时间(pulledAt)/变化统计(changes)/计数/失败清单
 ├── indexes/pages.md        # ★ 页面定位入口（权威映射表）；model-usage.md 影响面入口
 ├── pages/<中文名-route>/   # page.json(原始Schema) / components.json(组件清单) / tree.md
-│                          # / bindings.md(数据绑定) / bizflows/<描述-code>/(action.js|action.cs)
+│                          # / page-meta.json(单页重建元数据) / bindings.md / bizflows/<描述-code>/...
 ├── public-bizflows/       # 公共编排（全页面共享；代码两步拉取自 design，C# 在 action.cs）
 └── models/ flows/ dictionaries/ datasets/ events/   # 资源定义（models 含 columns 字段清单）
 ```
@@ -73,16 +77,18 @@ D:/apps/qms/                # 项目目录（cpm pull --out D:/apps/qms，或 cd
 
 | 错误输出 | 含义与下一步 |
 |----------|--------------|
-| `ERROR: 未提供平台凭据...` | 缺账号密码：向用户索要后 `cpm login --account --password` 或设环境变量 |
-| `ERROR: 尚未绑定平台...` | 当前目录没 login 过：`cpm login --url <平台地址> --app <appId>` |
-| `ERROR: 尚未绑定平台。请先执行 cpm login --out <目录>...` | `--out` 目录没 login 过：按提示命令补全 `--url <平台地址> --app <appId>` 重新 login |
-| `ERROR: token 无效或已过期...` | 重新 login（凭据会话过期） |
-| `ERROR: 未找到页面 <x>...` | `--page` 参数不对：核对路由或页面 ID，或去掉参数全量拉取 |
+| `AUTH_REQUIRED` | 缺账号密码：设置 `CPM_ACCOUNT/CPM_PASSWORD` 后登录或重试 pull。 |
+| `CONFIG_REQUIRED` | `--out` 目录没绑定：先对同一目录执行 `cpm login --url <平台地址>`。 |
+| `AUTH_EXPIRED` | token 过期：重新 login 后最多重试一次 pull。 |
+| `PAGE_NOT_FOUND` / `PAGE_AMBIGUOUS` | 改用唯一 Route、Id 或 OutId。 |
+| `PARTIAL_BASELINE_REQUIRED` | 旧快照不能安全单页更新，先执行一次全量 pull。 |
+| `PAGE_REFRESH_DEGRADED` | 目标页未完整拉取，本次不写快照，稍后重试。 |
 
 ## 开发
 
 ```bash
 npm test                    # vitest 全量
+npm run build               # NodeNext TypeScript → dist ESM
 npx vitest run test/xxx     # 单文件
 ```
 

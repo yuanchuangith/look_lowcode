@@ -1,6 +1,18 @@
 # gxp-lowcode-readonly
 
-GXP 低代码只读诊断 MCP。stdio 与 Streamable HTTP 共用同一个 `create_mcp()` 工厂和同一组 15 个工具；服务不会执行数据库写入、画布保存或发布。当前工具明确区分同一动作的可编辑草稿副本与运行发布副本，并支持页面反查、动作名称、组件过滤、字段和历史发布快照定位。
+GXP 低代码只读诊断 MCP。服务不会执行数据库写入、画布保存或发布。Windows/macOS/Linux 本地 stdio 在原有 15 个 Look 工具之外增加 5 个 CPM 快照工具；公网 Streamable HTTP 8890 仍只注册原有 15 个工具，不能读取本地 CPM 凭据、调用 CLI 或触发刷新。当前工具明确区分同一动作的可编辑草稿副本与运行发布副本，并支持页面反查、动作名称、组件过滤、字段和历史发布快照定位。
+
+## CPM 本地快照定位
+
+CPM 快照补充页面全貌、菜单、组件、模型、数据集、字典、事件、审批流程、接口和公共动作定位；Look 当前发布副本、画布节点、生成 C#、历史异常和业务记录仍是运行结论的权威证据。
+
+- `cpm_snapshot_status()`：查看成功检查时间、CLI 版本、刷新错误和 30 分钟 TTL。
+- `refresh_cpm_snapshot(force=false, page_identifier=null)`：刷新本地快照；完整基线存在时可安全更新单页。
+- `search_platform_snapshot(...)`：有界搜索平台资源。
+- `inspect_page_snapshot(...)`：按 Route/Id/OutId 检查页面结构、绑定和规则文件。
+- `get_cpm_knowledge(...)`：只读快照中 `cpm-platform` 技能的一个白名单主题。
+
+快照超过 1800 秒时工具会同步等待刷新，单次最多 300 秒。刷新在临时副本完成后才原子换入；超时或失败保留旧快照。平台密码只从 Windows Credential Manager 固定目标 `Codex.GxpLowcodeReadonly.Cpm` 读取，并仅通过子进程环境变量传给 CLI。
 
 ## 页面与组件定位
 
@@ -30,10 +42,38 @@ Windows 本地注册见 [.mcp.json](.mcp.json)。首次使用：
 ```powershell
 ./scripts/setup.ps1
 ./scripts/configure_connection.ps1
+./scripts/configure_cpm.ps1
 ./scripts/start_mcp.ps1
 ```
 
 数据库元数据默认保存到 `%APPDATA%/GxpLowcodeReadonly/database.json`，密码保存到 Windows Credential Manager，不进入插件目录。
+
+新电脑或 macOS/Linux 使用时，让 Codex 完整读取根目录 `AI-SETUP.md`，然后执行跨平台安装器：Windows 使用 `python scripts/install_codex_plugin.py`，macOS/Linux 使用 `python3 scripts/install_codex_plugin.py`。安装器会建立独立本地 marketplace、安装插件和运行环境；安装后必须新建 Codex 会话。凭据不随仓库迁移，需在新电脑的操作系统钥匙串中重新隐藏输入。
+
+CPM 独立配置保存到 `%APPDATA%/GxpLowcodeReadonly/cpm.json`，不修改 `database.json`。版本化 CLI 安装到 `%LOCALAPPDATA%/GxpLowcodeReadonly/cpm-cli/0.3.1`，快照固定在 `%LOCALAPPDATA%/GxpLowcodeReadonly/cpm-snapshot`。`configure_cpm.ps1` 隐藏输入平台密码，保存凭据后执行首次登录和全量快照；需要有效平台地址、账号和密码才能完成真实验收。
+
+手动拉取使用 Look 的安全包装命令（默认强制刷新，不需要传密码）：
+
+```powershell
+./scripts/pull_cpm.ps1                         # 强制全量拉取
+./scripts/pull_cpm.ps1 -Page <Route或Id或OutId> # 强制单页拉取
+./scripts/pull_cpm.ps1 -IfStale                # 仅超过配置 TTL 时拉取
+./scripts/pull_cpm.ps1 -Json                   # 完整 JSON 报告
+```
+
+`setup.ps1` 同时在当前用户 PATH 中安装全局 `cpm` 命令，任意目录可运行：
+
+```powershell
+cpm status
+cpm whoami                         # 轻量在线验证缓存 token
+cpm pull
+cpm pull --page <Route或Id或OutId>
+cpm pull --if-stale
+cpm pull --json
+cpm --version
+```
+
+macOS/Linux 对应入口为 `sh scripts/setup.sh`、`sh scripts/configure_cpm.sh`、`sh scripts/configure_connection.sh` 和 `sh scripts/pull_cpm.sh`。运行数据使用 macOS `~/Library/Application Support/GxpLowcodeReadonly` 或 Linux `${XDG_DATA_HOME:-~/.local/share}/GxpLowcodeReadonly`，配置使用系统标准配置目录；密码只进入 macOS Keychain 或 Linux Secret Service，不提供明文回退。
 
 ### Streamable HTTP
 
@@ -86,4 +126,4 @@ LoadCredential=db-password:/etc/gxp-lowcode-readonly/db-password
 2. 数据库白名单/ACL 允许服务主机 `43.135.137.212` 使用专用只读账号连接。
 3. CPM 页面 Network 中请求直达 `43.135.137.212:8890/mcp`，完成 Session、CORS 和至少一次真实只读工具调用。
 
-历史服务器验收曾列出 11 个工具；当前本地定义为 15 个工具。远程服务需另行部署后才能具备本次能力；公网 8890 与数据库 ACL 仍是外部验收前置条件。
+历史服务器验收曾列出 11 个工具；当前本地 stdio 定义为 20 个工具，HTTP 入口固定为原有 15 个。远程服务需另行部署后才能具备本次能力；公网 8890 与数据库 ACL 仍是外部验收前置条件。

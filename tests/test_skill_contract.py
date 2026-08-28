@@ -65,6 +65,14 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("32 KB", reference)
         self.assertTrue(script.is_file())
 
+    def test_cpm_snapshot_is_candidate_layer_and_knowledge_is_progressive(self) -> None:
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        reference = (SKILL_ROOT / "references" / "cpm-snapshot-routing.md").read_text(encoding="utf-8")
+        for term in ("CPM 快照", "inspect_page_snapshot", "get_cpm_knowledge", "当前发布副本"):
+            self.assertIn(term, skill)
+        self.assertIn("快照候选，当前发布未确认", reference)
+        self.assertIn("references/components/<组件名>.md", reference)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -7,6 +7,16 @@ description: Use this skill when the user asks to 排查或复核 GXP 低代码�
 
 通过 `gxp-lowcode-readonly` MCP 从真实 ActionDesign 和只读业务证据定位问题。不要询问、读取、输出或转述数据库连接信息。
 
+## CPM 快照路由
+
+页面全貌、菜单入口、组件绑定、模型影响面、审批流程和接口问题，先用本地 CPM 快照形成候选范围；动作 code/RefId、草稿/发布、历史发布、画布分组节点、生成 C# 和业务记录仍以 Look 当前只读数据库工具为权威。涉及这些跨层定位时，先完整读取 `references/cpm-snapshot-routing.md`。
+
+- CPM 工具只读本地快照；刷新只更新本地文件，不修改平台设计、发布状态或业务数据。
+- 页面级问题优先 `inspect_page_snapshot`，全局检索优先 `search_platform_snapshot`；工具会在快照超过 30 分钟时等待安全刷新。
+- 组件或编排元件参数知识按需调用 `get_cpm_knowledge`，一次只读一个白名单主题，不一次加载全部 `cpm-platform` 参考资料。
+- 输出增加 `CPM快照` 证据层。它用于候选定位，不能覆盖 Look 对当前发布副本、画布节点和业务记录的确认。
+- 数据库不可用时，可以输出明确标记的 CPM 快照候选；不得据此声称当前运行配置、发布状态或业务行为已经确认。
+
 ## 业务规则极性门禁与会话锚点
 
 开始工具检查前，先用三行锁定规则；三项没有确认完整时，只报告当前配置，不判定正确或错误：
@@ -79,24 +89,25 @@ description: Use this skill when the user asks to 排查或复核 GXP 低代码�
 
 ## 精确排查流程
 
-1. 将用户原始输入完整传给 `diagnose_codex_input`；异常栈不要先改写。
-2. 确认动作身份：
+1. 先判断是否涉及页面全貌、菜单、组件、模型、流程或接口；命中时按 `references/cpm-snapshot-routing.md` 查 CPM 快照并记录候选。异常栈不要改写，也不要用快照替代历史发布证据。
+2. 将用户原始输入完整传给 `diagnose_codex_input`。
+3. 确认动作身份：
    - 有动作 code/RefId：`resolve_action`。
    - 只有页面/流程名称：`search_pages`，确认 Route/Id/OutId 后用 `list_page_actions` 枚举该页全部表单动作。
    - 只有中文业务名称或精确标识未命中：`search_actions`。
    - 名称返回多个动作时，不得默认选第一个；按动作类型、code、RefId、页面 ID 和名称消歧。
-3. 用 `get_design_versions` 读取当前草稿与当前发布。默认不加载历史；只有排查历史异常时使用 `include_history=true`。
-4. 用 `inspect_action` 定位节点：
+4. 用 `get_design_versions` 读取当前草稿与当前发布。默认不加载历史；只有排查历史异常时使用 `include_history=true`。
+5. 用 `inspect_action` 定位节点：
    - 传已知分组、节点 Key、业务关键词。
    - 已知字段时传 `focus_fields`，优先读取 `field_evidence`。
    - 第一阶段只读定位和 `facts`，不要读取参数或生成 C#。
    - 第二阶段已缩小到分组、节点或不超过 10 个节点的范围后，才传 `include_params=true`，以完整 `paramsValue` 为准。
    - 下拉或过滤问题完整读取 `references/component-filter-audit.md`，再用 `inspect_component_filters` 审计全部写入阶段。
-5. 用户描述了点击、选择、留空、批量编辑等具体交互时，先执行“交互分支命中门禁”，再给修改方案。
-6. 沿 `CallPublicAction`、`CallAction` 继续追踪，直到数据库读写、显式返回或首个异常点。
-7. 业务表先 `describe_table`，再 `get_records` 使用索引等值条件、小列集和小 `limit`。
-8. 用 `references/report-contract.md` 输出结论；不要省略定位字段或写“同上”。
-9. 只有命中“源码升级门禁”时，才按 `source_hints` 受限读取前端、后端或两端源码；否则明确写“低代码证据已足够，无需查源码”。
+6. 用户描述了点击、选择、留空、批量编辑等具体交互时，先执行“交互分支命中门禁”，再给修改方案。
+7. 沿 `CallPublicAction`、`CallAction` 继续追踪，直到数据库读写、显式返回或首个异常点。
+8. 业务表先 `describe_table`，再 `get_records` 使用索引等值条件、小列集和小 `limit`。
+9. 用 `references/report-contract.md` 输出结论；不要省略定位字段或写“同上”。
+10. 只有命中“源码升级门禁”时，才按 `source_hints` 受限读取前端、后端或两端源码；否则明确写“低代码证据已足够，无需查源码”。
 
 ## 问题输出格式门禁
 
@@ -179,6 +190,7 @@ description: Use this skill when the user asks to 排查或复核 GXP 低代码�
 
 ## 参考文件
 
+- 页面全貌、菜单、组件绑定、模型影响面、审批流程或接口定位时，完整读取 `references/cpm-snapshot-routing.md`。
 - 定位动作、版本、画布和历史时间时，完整读取 `references/platform-map.md`。
 - 输出问题、保存复核、发布复核或异常结论前，完整读取 `references/report-contract.md`。
 - 需要连接已打开的 Chrome 页签取证时，完整读取 `references/runtime-browser-evidence.md`。

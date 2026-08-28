@@ -33,7 +33,7 @@ def main() -> int:
     database = ask("Database name", current.database if current else "")
     user = ask("Database user", current.user if current else "")
     credential_target = ask(
-        "Windows credential target",
+        "Operating-system credential target",
         current.credential_target if current else "Codex.GxpLowcodeReadonly",
     )
     password = getpass.getpass("Database password (hidden): ")

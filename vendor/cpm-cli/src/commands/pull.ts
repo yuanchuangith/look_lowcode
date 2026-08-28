@@ -38,7 +38,7 @@ async function resolveToken(cwd, url) {
  */ async function fetchPage(ctx, prefix, appId, siteOutId, p, failures, gate, prevDeleted) {
     // 上次已判死的僵尸条目（route+id 双命中）：零请求直接标记 deleted；
     // 同 route 换 id（平台重建页面）不命中，照常拉取
-    if (prevDeleted[p.route] === p.id) {
+    if (prevDeleted[p.route] === (p.outId || p.id)) {
         return {
             summary: p, pageSchema: null, deleted: true,
             flows: [], translations: new Map(),

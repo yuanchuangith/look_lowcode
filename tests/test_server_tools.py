@@ -3,7 +3,7 @@ from __future__ import annotations
 import inspect
 import unittest
 
-from server import MCP_TOOLS, inspect_action
+from server import LOCAL_CPM_TOOLS, MCP_TOOLS, create_mcp, inspect_action
 
 
 class ServerToolRegistrationTests(unittest.TestCase):
@@ -17,6 +17,12 @@ class ServerToolRegistrationTests(unittest.TestCase):
         signature = inspect.signature(inspect_action)
         self.assertFalse(signature.parameters["include_generated_csharp"].default)
         self.assertEqual(20, signature.parameters["max_nodes"].default)
+
+    def test_local_stdio_has_20_tools_and_http_factory_can_keep_original_15(self) -> None:
+        self.assertEqual(15, len(MCP_TOOLS))
+        self.assertEqual(5, len(LOCAL_CPM_TOOLS))
+        self.assertEqual(20, len(create_mcp()._tool_manager._tools))
+        self.assertEqual(15, len(create_mcp(include_local_cpm=False)._tool_manager._tools))
 
 
 if __name__ == "__main__":

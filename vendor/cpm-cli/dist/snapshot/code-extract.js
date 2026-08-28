@@ -25,9 +25,10 @@ const NAME_MAX = 64;
  */
 export function displaySlug(displayName, code) {
     const raw = (displayName ?? '').trim();
+    const safeCode = slugify(String(code ?? ''));
     if (!raw)
-        return code; // 中文名缺失：纯短码，不带悬挂连字符
+        return safeCode; // 中文名缺失：纯短码，不带悬挂连字符
     const safeName = slugify(raw).slice(0, NAME_MAX).replace(/-+$/g, '');
-    return safeName && safeName !== 'unnamed' ? `${safeName}-${code}` : code;
+    return safeName && safeName !== 'unnamed' ? `${safeName}-${safeCode}` : safeCode;
 }
 //# sourceMappingURL=code-extract.js.map

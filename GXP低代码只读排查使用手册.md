@@ -2,7 +2,7 @@
 
 适用插件：`gxp-lowcode-readonly`  
 适用 Skill：`gxp-lowcode-debug`  
-文档对应版本：`0.3.0+codex.20260826050514`
+文档对应版本：`0.3.1（Look + CPM 本地快照，Windows/macOS/Linux 本地 stdio）`
 
 ## 1. 用途
 
@@ -107,16 +107,19 @@ include_generated_csharp=false
 
 ## 4. 标准排查流程
 
-1. 将用户原始输入完整交给 `diagnose_codex_input`，异常栈不要预先改写。
-2. 有页面或流程名称时，先用 `search_pages` 定位 Route、Id 或 OutId，再用 `list_page_actions` 枚举页面动作。
-3. 有动作 code/RefId 时使用 `resolve_action`；只有中文业务名称或精确标识未命中时使用 `search_actions`。
-4. 用 `get_design_versions` 读取当前草稿；只有异常才加载发布版本，发布版本异常加载发布的历史。
-5. 用 `inspect_action` 做第一阶段紧凑定位，缩小范围后再读取完整参数。
-6. 下拉、过滤、值被清空或覆盖问题必须使用 `inspect_component_filters`，审计同一组件的全部 `DataFilter` 写入点。
-7. 需要业务数据证据时，先 `describe_table`，再用 `get_records` 进行索引等值、小列集、小数量查询。
-8. 沿 `CallAction`、`CallPublicAction` 追踪到最终数据动作、显式返回或首个异常点，再形成结论和画布修改方案。
+1. 页面全貌、菜单、组件、模型、流程或接口问题先用 `search_platform_snapshot`；已知页面 Route/Id/OutId 时直接用 `inspect_page_snapshot`。CPM 结果标记为候选证据。
+2. 将用户原始输入完整交给 `diagnose_codex_input`，异常栈不要预先改写。
+3. 有页面或流程名称时，用 Look 的 `search_pages` 定位当前页面 Route、Id 或 OutId，再用 `list_page_actions` 枚举页面动作。
+4. 有动作 code/RefId 时使用 `resolve_action`；只有中文业务名称或精确标识未命中时使用 `search_actions`。
+5. 用 `get_design_versions` 读取当前草稿与发布；只有历史异常才加载发布历史。
+6. 用 `inspect_action` 做第一阶段紧凑定位，缩小范围后再读取完整参数。
+7. 下拉、过滤、值被清空或覆盖问题必须使用 `inspect_component_filters`，审计同一组件的全部 `DataFilter` 写入点。
+8. 需要业务数据证据时，先 `describe_table`，再用 `get_records` 进行索引等值、小列集、小数量查询。
+9. 沿 `CallAction`、`CallPublicAction` 追踪到最终数据动作、显式返回或首个异常点，再形成结论和画布修改方案。
 
-## 5. 15 个 MCP 工具
+## 5. MCP 工具
+
+本地 Windows stdio 共 20 个工具；公网 HTTP 8890 仍只有下表前 15 个 Look 工具。HTTP 不注册 CPM 工具。
 
 | 分类 | 工具 | 用途 |
 | --- | --- | --- |
@@ -135,6 +138,33 @@ include_generated_csharp=false
 | 表结构 | `describe_table` | 在读取业务表前返回字段和索引。 |
 | 业务记录 | `get_records` | 使用结构化、窄条件和硬限制读取业务记录。 |
 | 受控 SQL | `readonly_sql` | 结构化工具无法表达时执行一条 AST 校验的只读 SQL。 |
+| CPM 状态（仅本地） | `cpm_snapshot_status` | 查看快照成功检查时间、CLI 版本、TTL 与 failures。 |
+| CPM 刷新（仅本地） | `refresh_cpm_snapshot` | 强制或按需刷新本地快照；不写平台。 |
+| CPM 搜索（仅本地） | `search_platform_snapshot` | 有界搜索页面、菜单、组件、模型、流程、接口等候选。 |
+| CPM 页面（仅本地） | `inspect_page_snapshot` | 按 Route/Id/OutId 查看页面结构、绑定和规则文件。 |
+| CPM 知识（仅本地） | `get_cpm_knowledge` | 按白名单读取一个组件、元件或平台专题。 |
+
+### CPM 配置和刷新
+
+```powershell
+./scripts/setup.ps1
+./scripts/configure_cpm.ps1
+```
+
+- 配置：`%APPDATA%\GxpLowcodeReadonly\cpm.json`，与 `database.json` 独立。
+- 密码：Windows Credential Manager 目标 `Codex.GxpLowcodeReadonly.Cpm`，不进入参数、JSON 或日志。
+- 快照：`%LOCALAPPDATA%\GxpLowcodeReadonly\cpm-snapshot`。
+- TTL：1800 秒（30 分钟）；超时：300 秒；并发数：10。
+- 首次、全局搜索或基线缺失执行全量刷新；精确页面在完整基线上执行单页刷新。
+- 超时或失败保留旧快照。`manifest.pulledAt` 表示内容最后变化时间，TTL 使用外部状态中的成功检查时间。
+
+诊断输出单独列出 `CPM快照` 证据层和刷新时间。当前发布配置、运行行为或业务数据结论必须再由 Look live DB 复核；数据库不可用时只能报告“快照候选，当前发布未确认”。
+
+命令行手动拉取：`./scripts/pull_cpm.ps1`；指定页面使用 `-Page <Route或Id或OutId>`，只在过期时刷新使用 `-IfStale`。
+
+执行 `setup.ps1` 后也可在任意目录使用全局命令：`cpm status`、`cpm whoami`（在线验证 token）、`cpm pull`、`cpm pull --page <Route或Id或OutId>`、`cpm pull --if-stale`。
+
+新电脑可让 Codex 完整读取根目录 `AI-SETUP.md` 后执行 `scripts/install_codex_plugin.py`。macOS/Linux 使用对应 `.sh` 入口；快照分别位于 `~/Library/Application Support/GxpLowcodeReadonly/cpm-snapshot` 或 `${XDG_DATA_HOME:-~/.local/share}/GxpLowcodeReadonly/cpm-snapshot`，密码保存到 macOS Keychain 或 Linux Secret Service。
 
 ### `inspect_action` 限流规则
 

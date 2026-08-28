@@ -9,6 +9,7 @@ import { runPull } from './commands/pull.js';
 // 版本号从包内 package.json 读（dist/cli.js 与 src/cli.ts 到包根都是上一级，两种运行模式同路径）
 const pkg = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const program = new Command();
+program.exitOverride();
 program
     .name('cpm')
     .description('CPM 低代码平台 AI 配套 CLI：拉取平台配置物化为本地快照')
@@ -29,7 +30,7 @@ program
 program
     .command('pull')
     .description('拉取平台配置并物化为项目目录快照（平铺于 --out 或当前目录）')
-    .option('--page <id|route>', '只拉取单个页面（缺省全量）')
+    .option('--page <route|id|outId>', '只拉取单个页面（缺省全量）')
     .option('--out <dir>', '项目目录（缺省当前目录；快照平铺写入）')
     .option('--json', '输出机器可读结果')
     .option('--concurrency <n>', '全局并发上限（缺省 10）')
@@ -40,5 +41,30 @@ program
         concurrency: opts.concurrency ? parseInt(opts.concurrency, 10) : undefined,
     });
 });
-program.parseAsync();
+try {
+    await program.parseAsync();
+}
+catch (error) {
+    const code = error?.code;
+    if (code === 'commander.helpDisplayed' || code === 'commander.version') {
+        process.exitCode = 0;
+    }
+    else {
+        const jsonPull = process.argv.includes('pull') && process.argv.includes('--json');
+        if (jsonPull) {
+            console.log(JSON.stringify({
+                ok: false,
+                mode: process.argv.includes('--page') ? 'page' : 'full',
+                page: null,
+                counts: {},
+                changes: { added: 0, updated: 0, removed: 0, removedPaths: [] },
+                failures: [],
+                health: null,
+                durationMs: 0,
+                error: { code: 'INVALID_ARGUMENT', message: String(error?.message ?? error) },
+            }));
+        }
+        process.exitCode = Number(error?.exitCode) || 1;
+    }
+}
 //# sourceMappingURL=cli.js.map

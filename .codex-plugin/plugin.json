@@ -1,7 +1,7 @@
 {
   "name": "gxp-lowcode-readonly",
-  "version": "0.3.0+codex.20260826064225",
-  "description": "Read-only GXP low-code diagnostics with compact page/action resolution, all-writer component filter audits, bounded canvas inspection, source-hint routing, history-aware exception tracing, and guarded SQL.",
+  "version": "0.3.1+codex.20260826111404",
+  "description": "Read-only GXP low-code diagnostics with local CPM snapshot discovery, compact page/action resolution, bounded canvas inspection, history-aware exception tracing, and guarded SQL.",
   "author": {
     "name": "Local developer"
   },

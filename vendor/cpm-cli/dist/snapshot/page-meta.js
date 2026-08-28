@@ -60,12 +60,10 @@ export function loadPageMetadata(outDir) {
         errors.push('pages/ 中没有页面元数据');
     return { metadata, errors };
 }
-function identityValues(value) {
-    return [value?.route, value?.id, value?.outId].filter((v) => typeof v === 'string' && v.length > 0);
-}
 export function samePage(a, b) {
-    const av = new Set(identityValues(a));
-    return identityValues(b).some(v => av.has(v));
+    return Boolean((a?.outId && b?.outId && a.outId === b.outId)
+        || (a?.id && b?.id && a.id === b.id)
+        || (a?.route && b?.route && a.route === b.route));
 }
 export function assertPartialBaseline(outDir, pageCatalog) {
     const loaded = loadPageMetadata(outDir);
