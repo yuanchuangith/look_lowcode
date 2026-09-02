@@ -1,6 +1,6 @@
 # gxp-lowcode-readonly
 
-GXP 低代码只读诊断 MCP。服务不会执行数据库写入、画布保存或发布。Windows/macOS/Linux 本地 stdio 在原有 15 个 Look 工具之外增加 5 个 CPM 快照工具；公网 Streamable HTTP 8890 仍只注册原有 15 个工具，不能读取本地 CPM 凭据、调用 CLI 或触发刷新。当前工具明确区分同一动作的可编辑草稿副本与运行发布副本，并支持页面反查、动作名称、组件过滤、字段和历史发布快照定位。
+GXP 低代码只读诊断 MCP。服务不会执行数据库写入、画布保存或发布。Windows/macOS/Linux 本地 stdio 在 16 个 Look 工具之外增加 5 个 CPM 快照工具；公网 Streamable HTTP 8890 只注册 16 个 Look 工具，不能读取本地 CPM 凭据、调用 CLI 或触发刷新。当前工具明确区分同一动作的可编辑草稿副本与运行发布副本，并支持页面反查、动作名称、控制流树、依赖关系图、组件过滤、字段和历史发布快照定位。
 
 ## CPM 本地快照定位
 
@@ -19,6 +19,8 @@ CPM 快照补充页面全貌、菜单、组件、模型、数据集、字典、�
 - `search_pages(query, limit=20)`：先按 Route/Id/OutId、中文显示名精确或包含匹配；无结果时只在命中中文二元词的有界候选中排序，不读取整个应用页面列表。
 - `list_page_actions(page_identifier, limit=50)`：接收精确 Route、Id 或 OutId，列出页面全部未删除表单动作及 code、RefId、显示名称。
 - `inspect_component_filters(identifier, component, ...)`：聚合同一组件跨分组的全部 `DataFilter` 写入点，返回执行阶段、完整过滤事实、父级分支和相邻节点；不返回生成 C#。
+
+`inspect_action` 为每个命中节点增量返回最小 `control_flow` 配对元数据。`inspect_control_flow(identifier, ...)` 先解析完整动作分组，再按节点或范围裁剪最小完整控制块，可返回结构化块、文本树、控制流 Mermaid、数据依赖 Mermaid，以及最多 20 个命名场景的三态静态路径。它覆盖 IF/ElseIf/Else、循环和 Try/Catch/Finally；结构漂移、孤立分支、闭合错误或未知插件块会显式返回 `valid | partial | invalid`，不会把不完整窗口伪装成确定配对。
 
 `inspect_action` 默认 `include_generated_csharp=false`，新增 `max_nodes=20`。传入 `terms` 不再隐式搜索生成 C#；旧调用方必须显式传 `include_generated_csharp=true`。精确 `csharp_line` 不受该默认值影响。节点超过 `max_nodes`、生成 C# 超过 20 处或完整参数命中超过 10 个节点时，响应返回截断/缩小范围元数据。
 
@@ -126,4 +128,4 @@ LoadCredential=db-password:/etc/gxp-lowcode-readonly/db-password
 2. 数据库白名单/ACL 允许服务主机 `43.135.137.212` 使用专用只读账号连接。
 3. CPM 页面 Network 中请求直达 `43.135.137.212:8890/mcp`，完成 Session、CORS 和至少一次真实只读工具调用。
 
-历史服务器验收曾列出 11 个工具；当前本地 stdio 定义为 20 个工具，HTTP 入口固定为原有 15 个。远程服务需另行部署后才能具备本次能力；公网 8890 与数据库 ACL 仍是外部验收前置条件。
+历史服务器验收曾列出 11 个工具；当前本地 stdio 定义为 21 个工具，HTTP 入口固定为 16 个 Look 工具。远程服务需另行部署后才能具备本次能力；公网 8890 与数据库 ACL 仍是外部验收前置条件。

@@ -113,13 +113,14 @@ include_generated_csharp=false
 4. 有动作 code/RefId 时使用 `resolve_action`；只有中文业务名称或精确标识未命中时使用 `search_actions`。
 5. 用 `get_design_versions` 读取当前草稿与发布；只有历史异常才加载发布历史。
 6. 用 `inspect_action` 做第一阶段紧凑定位，缩小范围后再读取完整参数。
-7. 下拉、过滤、值被清空或覆盖问题必须使用 `inspect_component_filters`，审计同一组件的全部 `DataFilter` 写入点。
-8. 需要业务数据证据时，先 `describe_table`，再用 `get_records` 进行索引等值、小列集、小数量查询。
-9. 沿 `CallAction`、`CallPublicAction` 追踪到最终数据动作、显式返回或首个异常点，再形成结论和画布修改方案。
+7. 两层嵌套或涉及 Else/ElseIf/结束节点归属时，用 `inspect_control_flow` 读取完整闭合块、文本树和最小场景矩阵；`structure_status` 非 `valid` 时不判逻辑 Bug。
+8. 下拉、过滤、值被清空或覆盖问题必须使用 `inspect_component_filters`，审计同一组件的全部 `DataFilter` 写入点。
+9. 需要业务数据证据时，先 `describe_table`，再用 `get_records` 进行索引等值、小列集、小数量查询。
+10. 沿 `CallAction`、`CallPublicAction` 追踪到最终数据动作、显式返回或首个异常点，再形成结论和画布修改方案。
 
 ## 5. MCP 工具
 
-本地 Windows stdio 共 20 个工具；公网 HTTP 8890 仍只有下表前 15 个 Look 工具。HTTP 不注册 CPM 工具。
+本地 Windows stdio 共 21 个工具；公网 HTTP 8890 有下表前 16 个 Look 工具。HTTP 不注册 CPM 工具。
 
 | 分类 | 工具 | 用途 |
 | --- | --- | --- |
@@ -130,8 +131,9 @@ include_generated_csharp=false
 | 动作搜索 | `search_actions` | 按中文名称、code 或 RefId 搜索公共/表单动作。 |
 | 动作解析 | `resolve_action` | 精确解析动作 code/RefId，必要时回退名称搜索。 |
 | 版本读取 | `get_design_versions` | 只读取当前草稿，只有读取草稿版本失败才读取当前发布和可选历史发布快照。 |
-| 版本说明 | `compare_description` | 草稿在没有结果编辑技能更改过是与发布副本是没有差异的。 |
+| 版本对比 | `compare_designs` | 比较当前发布与草稿的内容、控制流配对和结构有效性变化。 |
 | 画布检查 | `inspect_action` | 返回有界节点事实、必要参数和按需生成 C# 证据。 |
+| 控制流检查 | `inspect_control_flow` | 返回完整控制块、文本树、控制流/依赖 Mermaid 和三态场景矩阵。 |
 | 过滤审计 | `inspect_component_filters` | 汇总同一组件跨分组、跨阶段的全部过滤写入点。 |
 | 条件验证 | `evaluate_node_predicate` | 使用给定记录验证一个画布节点条件中的字面量部分。 |
 | 异常追踪 | `trace_dynamic_exception` | 将动态 C# 异常行映射到发布时间、动作和候选画布节点。 |

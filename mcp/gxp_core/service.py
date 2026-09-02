@@ -441,6 +441,87 @@ class GxpReadonlyService:
             )
         return result
 
+    def inspect_control_flow(
+        self,
+        identifier: str,
+        *,
+        version: str = "published",
+        group: str | None = None,
+        node_key: str | None = None,
+        start: int | None = None,
+        end: int | None = None,
+        scope: str = "auto",
+        include_relations: bool = True,
+        relation_types: list[str] | None = None,
+        render: str | list[str] | None = None,
+        scenarios: Any = None,
+        design_id: str | None = None,
+        at_time: str | None = None,
+        max_nodes: int = 120,
+        max_edges: int = 240,
+    ) -> dict[str, Any]:
+        matches = self.repository.resolve_action(identifier)
+        if not matches:
+            matches = self.repository.search_actions(identifier)
+        if len(matches) != 1:
+            return {
+                "identifier": identifier,
+                "resolution_status": "not_found" if not matches else "ambiguous",
+                "matches": matches,
+                "count": len(matches),
+                "next_step": "Select one exact action code or RefId before control-flow inspection.",
+            }
+        ref_id = str(matches[0]["ref_id"])
+        design = self.repository.load_design(
+            ref_id,
+            version=version,
+            design_id=design_id,
+            at_time=at_time,
+            include_deleted=bool(design_id or at_time),
+        )
+        flow = self.inspector.inspect_control_flow(
+            design["data_json"],
+            group=group,
+            node_key=node_key,
+            start=start,
+            end=end,
+            scope=scope,
+            include_relations=include_relations,
+            relation_types=relation_types,
+            render=render,
+            scenarios=scenarios,
+            max_nodes=max_nodes,
+            max_edges=max_edges,
+        )
+        published = design.get("version") == "published"
+        current_runtime_copy = published and not bool(design.get("is_deleted"))
+        return {
+            "action": design.get("metadata"),
+            "design": {
+                key: design.get(key)
+                for key in (
+                    "design_id",
+                    "version",
+                    "is_deleted",
+                    "modified_time",
+                    "data_sha256",
+                    "csharp_sha256",
+                )
+            }
+            | {
+                "copy_role": (
+                    "runtime_published_copy"
+                    if current_runtime_copy
+                    else "historical_published_snapshot"
+                    if published
+                    else "editable_draft_copy"
+                ),
+                "used_by_runtime": current_runtime_copy,
+            },
+            "version_semantics": self._version_semantics(),
+            **flow,
+        }
+
     def inspect_component_filters(
         self,
         identifier: str,

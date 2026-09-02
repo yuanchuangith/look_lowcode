@@ -104,6 +104,43 @@ def inspect_action(
     )
 
 
+def inspect_control_flow(
+    identifier: str,
+    version: str = "published",
+    group: str | None = None,
+    node_key: str | None = None,
+    start: int | None = None,
+    end: int | None = None,
+    scope: str = "auto",
+    include_relations: bool = True,
+    relation_types: list[str] | None = None,
+    render: str | list[str] | None = None,
+    scenarios: dict[str, dict[str, Any]] | None = None,
+    design_id: str | None = None,
+    at_time: str | None = None,
+    max_nodes: int = 120,
+    max_edges: int = 240,
+) -> dict[str, Any]:
+    """Reconstruct complete control blocks, dependency graphs and static scenario paths."""
+    return service().inspect_control_flow(
+        identifier,
+        version=version,
+        group=group,
+        node_key=node_key,
+        start=start,
+        end=end,
+        scope=scope,
+        include_relations=include_relations,
+        relation_types=relation_types,
+        render=render,
+        scenarios=scenarios,
+        design_id=design_id,
+        at_time=at_time,
+        max_nodes=max_nodes,
+        max_edges=max_edges,
+    )
+
+
 def inspect_component_filters(
     identifier: str,
     component: str,
@@ -208,6 +245,7 @@ MCP_TOOLS = (
     list_page_actions,
     get_design_versions,
     inspect_action,
+    inspect_control_flow,
     inspect_component_filters,
     compare_designs,
     trace_dynamic_exception,

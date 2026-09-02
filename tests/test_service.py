@@ -182,6 +182,16 @@ class ServiceInspectionLimitTests(unittest.TestCase):
         self.assertFalse(result["too_broad_for_params"])
         self.assertEqual(1, result["node_count"])
         self.assertIn("paramsValue", result["nodes"][0])
+        self.assertIn("control_flow", result["nodes"][0])
+
+    def test_control_flow_tool_returns_summary_then_explicit_action_graph(self) -> None:
+        service = self.make_service(node_count=3)
+        summary = service.inspect_control_flow("PQDL0QlL")
+        self.assertEqual("summary", summary["scope"]["mode"])
+        self.assertEqual([], summary["graph"]["nodes"])
+        action = service.inspect_control_flow("PQDL0QlL", scope="action")
+        self.assertEqual(3, len([node for node in action["graph"]["nodes"] if node["type"] == "canvas"]))
+        self.assertIn("tree_text", action["views"])
 
     def test_page_action_ambiguity_requires_exact_identifier(self) -> None:
         class Repository:

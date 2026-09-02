@@ -73,6 +73,21 @@ class SkillContractTests(unittest.TestCase):
         self.assertIn("快照候选，当前发布未确认", reference)
         self.assertIn("references/components/<组件名>.md", reference)
 
+    def test_nested_control_flow_requires_visible_structure_and_scenarios(self) -> None:
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        for term in (
+            "inspect_control_flow",
+            "两层及以上嵌套",
+            "views.tree_text",
+            "structure_status != valid",
+            "结构候选/待确认",
+            "不得据此判定逻辑 Bug",
+            "scenario_matrix",
+            "每个业务分支与空值边界",
+            "三态静态实际路径",
+        ):
+            self.assertIn(term, skill)
+
 
 if __name__ == "__main__":
     unittest.main()

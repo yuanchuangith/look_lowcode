@@ -39,6 +39,14 @@ description: Use this skill when the user asks to 排查或复核 GXP 低代码�
 - 仅当异常栈给出精确 C# 行，或节点事实仍不足以解释问题时，才显式传 `include_generated_csharp=true`。`terms` 不是读取生成 C# 的授权。
 - 下拉、过滤、值被覆盖问题必须改用 `inspect_component_filters` 汇总同一组件的全部 `DataFilter` 写入点；不能凭单个初始化节点下结论。
 
+## 嵌套控制流证据门禁
+
+- 出现两层及以上嵌套，或结论涉及 `Else`、`ElseIf`、`IfEnd`、循环结束、`Catch`、`Finally` 的归属时，必须在当前运行副本上调用 `inspect_control_flow`。不得用相邻节点或平铺 `parent_path` 猜测配对。
+- 回答必须展示 `views.tree_text` 的简短、可审计控制流树，明确 `root_block`、`matched_branch` 和 `matched_end`；不能只依赖隐藏思考过程。
+- `structure_status != valid` 时，所有配对只能写“结构候选/待确认”。不得据此判定逻辑 Bug、分支不可达或给出画布修改位置。
+- 判定分支逻辑 Bug 前必须同时具备：当前运行副本、`structure_status=valid` 的控制流、用户已确认的明确业务规则、覆盖每个业务分支和空值边界的最小 `scenario_matrix`，并且期望路径与三态静态实际路径不一致。证据缺一项时写“候选”或“待运行验证”。
+- `scenario_matrix` 只代表无副作用的静态三态推演；`unknown`、表达式、函数调用和数据库查询不得改写成真实运行已经发生。场景不要求指数级穷举，但至少覆盖每个业务分支与空值边界。
+
 ## 版本语义
 
 - 草稿和发布是同一动作的两个副本，不是两套独立业务逻辑。
@@ -103,11 +111,12 @@ description: Use this skill when the user asks to 排查或复核 GXP 低代码�
    - 第一阶段只读定位和 `facts`，不要读取参数或生成 C#。
    - 第二阶段已缩小到分组、节点或不超过 10 个节点的范围后，才传 `include_params=true`，以完整 `paramsValue` 为准。
    - 下拉或过滤问题完整读取 `references/component-filter-audit.md`，再用 `inspect_component_filters` 审计全部写入阶段。
-6. 用户描述了点击、选择、留空、批量编辑等具体交互时，先执行“交互分支命中门禁”，再给修改方案。
-7. 沿 `CallPublicAction`、`CallAction` 继续追踪，直到数据库读写、显式返回或首个异常点。
-8. 业务表先 `describe_table`，再 `get_records` 使用索引等值条件、小列集和小 `limit`。
-9. 用 `references/report-contract.md` 输出结论；不要省略定位字段或写“同上”。
-10. 只有命中“源码升级门禁”时，才按 `source_hints` 受限读取前端、后端或两端源码；否则明确写“低代码证据已足够，无需查源码”。
+6. 两层嵌套或涉及分支/结束节点归属时，用 `inspect_control_flow` 读取完整闭合块、可见树和最小场景矩阵；结构无效时停止 Bug 判断。
+7. 用户描述了点击、选择、留空、批量编辑等具体交互时，先执行“交互分支命中门禁”，再给修改方案。
+8. 沿 `CallPublicAction`、`CallAction` 继续追踪，直到数据库读写、显式返回或首个异常点。
+9. 业务表先 `describe_table`，再 `get_records` 使用索引等值条件、小列集和小 `limit`。
+10. 用 `references/report-contract.md` 输出结论；不要省略定位字段或写“同上”。
+11. 只有命中“源码升级门禁”时，才按 `source_hints` 受限读取前端、后端或两端源码；否则明确写“低代码证据已足够，无需查源码”。
 
 ## 问题输出格式门禁
 
@@ -122,7 +131,7 @@ description: Use this skill when the user asks to 排查或复核 GXP 低代码�
 ## 交互分支命中门禁
 
 - 从用户实际操作还原运行输入。例如“未选择关联对象”和“触发选择组件后已有值”是互斥路径，不得共用一个修改结论。
-- 检查目标节点所在的所有父级 `IF/Else`，读取父条件完整 `paramsValue`，并同时检查同级另一分支直到各自的最终写库动作。
+- 检查目标节点所在的所有父级 `IF/Else`，以 `inspect_control_flow` 的结构化分支为准，读取父条件完整 `paramsValue`，并同时检查同级另一分支直到各自的最终写库动作。
 - 给修改方案前必须证明三件事：用户操作满足该分支条件；该分支会执行目标节点；该分支最终写入了出现异常的表和字段。任一项缺失时写“未确认命中分支”，不得让用户修改。
 - 存在并行分支时，先输出简短分支对照：触发条件、用户本次命中路径、最终调用动作、最终写入字段。不得因为节点名称相近、字段相同或同在一个分组就默认是同一路径。
 - 只读业务样本可用时，用操作时间、记录 ID 和 `lastModificationTime` 反证实际命中的最终写入；不得用另一分支生成 C# 解释当前样本。

@@ -1,4 +1,4 @@
 interface:
   display_name: "GXP 低代码精确排查"
-  short_description: "只读定位动作副本、画布节点、字段映射、C# 与历史异常证据"
-  default_prompt: "使用 $gxp-lowcode-debug 先锁定当前现象、期望规则和无匹配行为；页面、菜单、组件、模型、流程或接口先用 CPM 快照定位候选，再由 Look 当前发布证据复核。复用会话锚点做紧凑只读检查并输出修改方案；不得调用或转入 gxp-lowcode-edit，只有用户后续显式调用编辑技能时才允许实施。"
+  short_description: "只读定位动作副本、控制流树、关联关系、字段、C# 与历史异常"
+  default_prompt: "使用 $gxp-lowcode-debug 先锁定当前现象、期望规则和无匹配行为；页面、菜单、组件、模型、流程或接口先用 CPM 快照定位候选，再由 Look 当前发布证据复核。复用会话锚点做紧凑只读检查；嵌套分支必须读取有效控制流、展示文本树并执行最小三态场景矩阵后再判断 Bug。输出修改方案但不得调用或转入 gxp-lowcode-edit，只有用户后续显式调用编辑技能时才允许实施。"

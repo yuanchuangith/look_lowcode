@@ -7,7 +7,7 @@
 - 不读取、输出、记录或通过命令参数传递平台密码和数据库密码。
 - 密码只通过隐藏输入保存到操作系统凭据存储：Windows Credential Manager、macOS Keychain 或 Linux Secret Service。
 - Linux 没有可用的安全 keyring 后端时停止配置并提示安装系统 keyring，不得回退到明文文件。
-- CPM 能力仅注册到本地 stdio；HTTP 8890 仍只保留原有 15 个只读工具。
+- CPM 能力仅注册到本地 stdio；HTTP 8890 注册 16 个 Look 只读工具，本地 stdio 另含 5 个 CPM 工具，共 21 个。
 
 ## 前置检查
 

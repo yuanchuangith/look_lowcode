@@ -4,7 +4,7 @@ import json
 import re
 from typing import Any
 
-from .canvas import CanvasInspector
+from .canvas import CanvasInspector, condition_ast, evaluate_condition_ast
 from .repository import GxpRepository
 from .source_hints import build_source_hints
 
@@ -348,6 +348,17 @@ class DiagnosticEngine:
                     or (node.get("facts") or {}).get("condition")
                 ]
                 contexts = self.inspector.search_csharp(csharp, [message], context=4)
+                exception_blocks = [
+                    self.inspector.inspect_control_flow(
+                        data,
+                        group=str(node.get("group_key", "")),
+                        node_key=str(node.get("node_key", "")),
+                        scope="auto",
+                        include_relations=False,
+                        render="tree_text",
+                    )
+                    for node in exception_nodes[:10]
+                ]
                 evidence.append(
                     {
                         "design_id": version.get("design_id"),
@@ -359,6 +370,7 @@ class DiagnosticEngine:
                         "data_sha256": version.get("data_sha256"),
                         "csharp_sha256": version.get("csharp_sha256"),
                         "exception_nodes": exception_nodes,
+                        "exception_control_flow_blocks": exception_blocks,
                         "predicate_nodes_before_exception": predicate_nodes,
                         "generated_csharp_matches": contexts,
                     }
@@ -475,6 +487,17 @@ class DiagnosticEngine:
                         "generated_csharp": context,
                         "resolved_called_actions": resolved_calls,
                         "matching_canvas_nodes": canvas_nodes,
+                        "matching_control_flow_blocks": [
+                            self.inspector.inspect_control_flow(
+                                data,
+                                group=str(node.get("group_key", "")),
+                                node_key=str(node.get("node_key", "")),
+                                scope="auto",
+                                include_relations=False,
+                                render="tree_text",
+                            )
+                            for node in canvas_nodes[:10]
+                        ],
                         "exception_text_present": bool(message and message in csharp),
                         "evidence_score": score,
                     }
@@ -675,45 +698,49 @@ class DiagnosticEngine:
             raise ValueError("The requested group/node was not found")
         node = nodes[0]
         filters = (node.get("facts") or {}).get("filters") or []
+        params = node.get("paramsValue") or {}
+        input_params = params.get("inputParams") or {}
+        ast = (node.get("facts") or {}).get("condition_ast")
+        if not ast:
+            where = (
+                (input_params.get("selectDataConfig") or {}).get("whereConditions")
+                or input_params.get("whereConditions")
+                or {}
+            )
+            ast = condition_ast(
+                where,
+                source_path="paramsValue.inputParams.whereConditions",
+            )
+        ast_evaluation = evaluate_condition_ast(ast, record)
+
+        def predicate_pairs(
+            ast_node: dict[str, Any] | None,
+            evaluation_node: dict[str, Any] | None,
+        ) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+            if not ast_node:
+                return []
+            if ast_node.get("type") == "predicate":
+                return [(ast_node, evaluation_node or {})]
+            pairs = []
+            eval_children = (evaluation_node or {}).get("children", []) or []
+            for index, child in enumerate(ast_node.get("children", []) or []):
+                child_eval = eval_children[index] if index < len(eval_children) else {}
+                pairs.extend(predicate_pairs(child, child_eval))
+            return pairs
+
         evaluations = []
-        for item in filters:
-            field = str(item.get("field", ""))
-            operator = str(item.get("operator", ""))
-            expression = str(item.get("expression", ""))
-            current = record.get(field)
-            literal: Any = expression
-            resolved = False
-            if expression.lower() == "null":
-                literal = None
-                resolved = True
-            elif (expression.startswith("\"") and expression.endswith("\"")) or (
-                expression.startswith("'") and expression.endswith("'")
-            ):
-                literal = expression[1:-1]
-                resolved = True
-            elif re.fullmatch(r"-?\d+(?:\.\d+)?", expression):
-                literal = float(expression) if "." in expression else int(expression)
-                resolved = True
-            elif expression.lower() in {"true", "false"}:
-                literal = expression.lower() == "true"
-                resolved = True
-            matched = None
-            if resolved:
-                op = operator.lower()
-                if op in {"=", "==", "equal", "equalto"}:
-                    matched = current == literal
-                elif op in {"<>", "!=", "notequal", "notequalto"}:
-                    matched = current != literal
-                elif op in {"isnull"}:
-                    matched = current is None
-                elif op in {"isnotnull"}:
-                    matched = current is not None
+        for index, (predicate, evaluation) in enumerate(predicate_pairs(ast, ast_evaluation)):
+            legacy = filters[index] if index < len(filters) else {}
+            result = evaluation.get("result", "unknown")
             evaluations.append(
                 {
-                    **item,
-                    "record_value": current,
-                    "literal_resolved": resolved,
-                    "matched": matched,
+                    **legacy,
+                    "condition_ast": predicate,
+                    "record_value": evaluation.get("left_value"),
+                    "literal_resolved": bool(evaluation.get("right_resolved")),
+                    "matched": True if result == "true" else False if result == "false" else None,
+                    "tri_state": result,
+                    "unresolved_inputs": evaluation.get("unresolved_inputs", []),
                 }
             )
         definite = [item["matched"] for item in evaluations if item["matched"] is not None]
@@ -723,5 +750,8 @@ class DiagnosticEngine:
             "node": node,
             "evaluations": evaluations,
             "all_definite_filters_match": all(definite) if definite else None,
-            "note": "Expression-based values remain unresolved and require caller variables.",
+            "condition_ast": ast,
+            "tri_state_result": ast_evaluation.get("result", "unknown"),
+            "unresolved_inputs": ast_evaluation.get("unresolved_inputs", []),
+            "note": "Static three-state evaluation only; expressions and missing inputs remain unknown.",
         }
