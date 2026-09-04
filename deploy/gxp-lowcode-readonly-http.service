@@ -11,7 +11,10 @@ WorkingDirectory=/home/ubuntu/gxp-lowcode-readonly/mcp
 Environment=PYTHONUNBUFFERED=1
 Environment=GXP_LOWCODE_CONFIG=/home/ubuntu/gxp-lowcode-readonly/database.json
 Environment=GXP_LOWCODE_DB_PASSWORD_FILE=%d/db-password
+Environment=GXP_RELATION_POLICY_FILE=/var/lib/gxp-lowcode-readonly/relation-policy.json
+Environment=GXP_LOWCODE_HTTP_ALLOWED_HOSTS=43-135-137-212.sslip.io,43-135-137-212.sslip.io:8892
 LoadCredential=db-password:/etc/gxp-lowcode-readonly/db-password
+StateDirectory=gxp-lowcode-readonly
 ExecStart=/home/ubuntu/gxp-lowcode-readonly/.venv/bin/python /home/ubuntu/gxp-lowcode-readonly/mcp/http_server.py
 Restart=on-failure
 RestartSec=3

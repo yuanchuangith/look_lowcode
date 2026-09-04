@@ -115,12 +115,12 @@ include_generated_csharp=false
 6. 用 `inspect_action` 做第一阶段紧凑定位，缩小范围后再读取完整参数。
 7. 两层嵌套或涉及 Else/ElseIf/结束节点归属时，用 `inspect_control_flow` 读取完整闭合块、文本树和最小场景矩阵；`structure_status` 非 `valid` 时不判逻辑 Bug。
 8. 下拉、过滤、值被清空或覆盖问题必须使用 `inspect_component_filters`，审计同一组件的全部 `DataFilter` 写入点。
-9. 需要业务数据证据时，先 `describe_table`，再用 `get_records` 进行索引等值、小列集、小数量查询。
+9. 表、字段或关系问题先用 `search_database_schema` 与 `inspect_table_schema`；关系过期、歧义或与当前证据冲突时，用 `resolve_table_relation(..., force_live=true)` 实时验证。具体业务数据仍先 `describe_table`，再用 `get_records` 进行索引等值、小列集、小数量查询。
 10. 沿 `CallAction`、`CallPublicAction` 追踪到最终数据动作、显式返回或首个异常点，再形成结论和画布修改方案。
 
 ## 5. MCP 工具
 
-本地 Windows stdio 共 21 个工具；公网 HTTP 8890 有下表前 16 个 Look 工具。HTTP 不注册 CPM 工具。
+本地 Windows stdio 共 28 个工具；公网 HTTP MCP 有下表前 16 个 Look 工具。HTTP MCP 不注册 CPM 或 Schema 工具。
 
 | 分类 | 工具 | 用途 |
 | --- | --- | --- |
@@ -145,6 +145,13 @@ include_generated_csharp=false
 | CPM 搜索（仅本地） | `search_platform_snapshot` | 有界搜索页面、菜单、组件、模型、流程、接口等候选。 |
 | CPM 页面（仅本地） | `inspect_page_snapshot` | 按 Route/Id/OutId 查看页面结构、绑定和规则文件。 |
 | CPM 知识（仅本地） | `get_cpm_knowledge` | 按白名单读取一个组件、元件或平台专题。 |
+| Schema 状态（仅本地） | `schema_snapshot_status` | 查看每日快照、Schema 指纹、可信关系和策略 revision。 |
+| Schema 刷新（仅本地） | `refresh_schema_snapshot` | 读取开发库元数据并全量验证候选关系。 |
+| Schema 搜索（仅本地） | `search_database_schema` | 按表名、字段名和备注有界搜索。 |
+| Schema 表详情（仅本地） | `inspect_table_schema` | 返回表、字段、索引、约束和当前可信关系。 |
+| 关系解析（仅本地） | `resolve_table_relation` | 按策略、快照新鲜度和实时数据库验证解析关系。 |
+| 关系否决（仅本地） | `reject_table_relation` | 用户明确确认错误后向远程提交 opaque relation ID。 |
+| 关系恢复（仅本地） | `restore_table_relation` | 恢复永久否决，随后重新进行数据验证。 |
 
 ### CPM 配置和刷新
 
@@ -165,6 +172,15 @@ include_generated_csharp=false
 命令行手动拉取：`./scripts/pull_cpm.ps1`；指定页面使用 `-Page <Route或Id或OutId>`，只在过期时刷新使用 `-IfStale`。
 
 执行 `setup.ps1` 后也可在任意目录使用全局命令：`cpm status`、`cpm whoami`（在线验证 token）、`cpm pull`、`cpm pull --page <Route或Id或OutId>`、`cpm pull --if-stale`。
+
+### Schema 快照和远程关系策略
+
+- Schema 与关系明细只保存在本地系统数据目录，TTL 为 86400 秒。
+- 推断关系要求目标唯一键、兼容字段类型、至少 20 个不同非空来源键以及 100% 全量匹配。
+- 远端只保存 opaque relation ID、状态、策略 revision 和审计元数据，不接收表名、字段名或业务值。
+- 每次使用推断关系前同步远程策略；策略状态不新鲜时只展示数据库声明外键。
+- 用户明确指出关系错误时提交永久否决，次日刷新会在查询数据前跳过该关系；恢复后重新验证。远程策略 API 免鉴权，仅保存 opaque ID 和标准审计元数据。
+- 快照关系过期、歧义或与故障证据冲突时实时查询开发库，实时结果不写回快照。
 
 新电脑可让 Codex 完整读取根目录 `AI-SETUP.md` 后执行 `scripts/install_codex_plugin.py`。macOS/Linux 使用对应 `.sh` 入口；快照分别位于 `~/Library/Application Support/GxpLowcodeReadonly/cpm-snapshot` 或 `${XDG_DATA_HOME:-~/.local/share}/GxpLowcodeReadonly/cpm-snapshot`，密码保存到 macOS Keychain 或 Linux Secret Service。
 

@@ -8,6 +8,7 @@ from starlette.middleware.cors import CORSMiddleware
 from starlette.types import ASGIApp
 
 from server import create_mcp
+from gxp_core.relation_policy import add_relation_policy_routes
 
 
 DEFAULT_HOST = "0.0.0.0"
@@ -26,17 +27,24 @@ ALLOWED_HEADERS = [
 
 
 def create_http_app(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> ASGIApp:
+    configured_hosts = [
+        item.strip()
+        for item in os.environ.get("GXP_LOWCODE_HTTP_ALLOWED_HOSTS", "").split(",")
+        if item.strip()
+    ]
     transport_security = TransportSecuritySettings(
         enable_dns_rebinding_protection=True,
         allowed_hosts=[
             f"43.135.137.212:{port}",
             f"127.0.0.1:{port}",
             f"localhost:{port}",
+            *configured_hosts,
         ],
         allowed_origins=ALLOWED_ORIGINS,
     )
     mcp = create_mcp(
         include_local_cpm=False,
+        include_local_schema=False,
         host=host,
         port=port,
         streamable_http_path="/mcp",
@@ -45,6 +53,7 @@ def create_http_app(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> ASGIA
         transport_security=transport_security,
     )
     app = mcp.streamable_http_app()
+    add_relation_policy_routes(app)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=ALLOWED_ORIGINS,

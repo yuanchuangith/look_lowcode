@@ -18,6 +18,15 @@ from gxp_core.cpm_snapshot import (
     inspect_page_snapshot,
     get_cpm_knowledge,
 )
+from gxp_core.schema_snapshot import (
+    schema_snapshot_status,
+    refresh_schema_snapshot,
+    search_database_schema,
+    inspect_table_schema,
+    resolve_table_relation,
+    reject_table_relation,
+    restore_table_relation,
+)
 
 
 def service() -> GxpReadonlyService:
@@ -264,8 +273,23 @@ LOCAL_CPM_TOOLS = (
     get_cpm_knowledge,
 )
 
+LOCAL_SCHEMA_TOOLS = (
+    schema_snapshot_status,
+    refresh_schema_snapshot,
+    search_database_schema,
+    inspect_table_schema,
+    resolve_table_relation,
+    reject_table_relation,
+    restore_table_relation,
+)
 
-def create_mcp(*, include_local_cpm: bool = True, **settings: Any) -> FastMCP:
+
+def create_mcp(
+    *,
+    include_local_cpm: bool = True,
+    include_local_schema: bool = True,
+    **settings: Any,
+) -> FastMCP:
     """Create one transport-specific MCP instance over the shared read-only tools."""
     app = FastMCP(
         "gxp-lowcode-readonly",
@@ -282,6 +306,9 @@ def create_mcp(*, include_local_cpm: bool = True, **settings: Any) -> FastMCP:
         app.tool()(tool)
     if include_local_cpm:
         for tool in LOCAL_CPM_TOOLS:
+            app.tool()(tool)
+    if include_local_schema:
+        for tool in LOCAL_SCHEMA_TOOLS:
             app.tool()(tool)
     return app
 

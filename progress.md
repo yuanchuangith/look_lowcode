@@ -1,0 +1,43 @@
+# Progress
+
+## 2026-09-04
+- Loaded the applicable GXP low-code debugging and file-planning skill instructions.
+- Inspected current database repository, read-only session limits, MCP registration split, HTTP server, installer, and tests.
+- Created persistent implementation plan and findings files.
+- Added Schema snapshot configuration with secure policy-token storage and production URL validation.
+- Added MySQL `information_schema` extraction, deterministic relationship candidate discovery, and aggregate-only full-data validation.
+- Added the database-independent remote SQLite policy store, per-client token authentication, opaque rejection/restore API, audit trail, and operator CLI.
+- Mounted policy routes beside the existing remote MCP without changing the remote MCP tool registry.
+- Python compilation passed for the new policy modules. A system-Python smoke test exposed the expected missing project dependency; recorded for runtime-interpreter verification.
+- Added the authenticated local policy client with ETag synchronization and immediate rejection-cache updates.
+- Added the local 24-hour snapshot manager, atomic refresh, strict relation acceptance, policy fail-closed behavior, search/inspect APIs, and live non-persisted relation verification.
+- Registered seven Schema/relation tools for local stdio only, preserved the remote MCP registry, and added cross-platform hidden-token configuration entrypoints.
+- Added keyset pagination for tables, columns, indexes, constraints, and foreign-key rows so metadata sets beyond the 500-row session cap remain complete.
+- Added focused tests for metadata-only candidate generation, strict aggregate validation, 501-column pagination, remote auth/ETag/roles/audit, shared rejection, lazy refresh, live fallback, and policy fail-closed behavior.
+- First focused test run passed 15/16 tests; the sole Windows cleanup error was traced to an unclosed test-only SQLite connection and corrected.
+- All new Python modules compile under the installed Look runtime; the first targeted unittest invocation exposed a missing `PYTHONPATH=mcp` test harness setting and was recorded.
+- Updated the Skill routing contract, agent metadata, README, setup guide, user manual, CORS host/header configuration, and systemd persistent policy storage.
+- Updated plugin discovery metadata so Schema and trusted-relation requests route to the expanded Skill behavior.
+- Wired the configured per-query timeout into all metadata/validation sessions and added the bounded two-worker relationship validation pool with total refresh timeout handling.
+- Completed CHECK pagination, Unicode-comment candidate terms, camel/underscore identifier matching, incoming declared-FK inspection, and target-key inference when callers omit target columns.
+- Full regression ran 92 tests with 87 passing, 3 live tests skipped, and 2 prompt-contract failures; restored both required Skill prompt clauses.
+- Added MCP tool descriptions and acceptance tests for HTTPS-only policy configuration, secret-field rejection, remote policy startup without database configuration, and atomic preservation after local refresh failure.
+- Re-ran the complete suite: 96 tests passed with 3 opt-in live tests skipped; Python compilation and diff whitespace checks passed.
+- Began final static review of timeout enforcement, remote opaque-data boundaries, ambiguity handling, and restore semantics.
+- Added deadline-aware Schema queries, non-waiting executor shutdown, restore-time local relation invalidation, and ambiguity/restore regression tests; corrected one indentation error caught immediately by compileall.
+- The 18-test Schema/policy focused suite now passes. Began remote deployment discovery; the provided literal SSH key path was not found on disk.
+- Located the matching `code_new.pem` in a messaging download directory and the system OpenSSH executable; first connection was correctly rejected because the source key file's inherited ACL was too broad.
+- Added the 8892 TLS reverse-proxy config and systemd allowed-host setting. The first combined backup/upload command had a shell quoting error, so remote state is being inspected before retrying with explicit paths.
+- Reworked the policy design per user direction: JSON instead of SQLite, all endpoints authentication-free, fixed public URL/scope defaults, and no client-token configuration on new computers.
+- Full local regression passes 99 tests with 3 opt-in live tests skipped. Uploaded the final JSON/public-policy files; the first remote preflight one-liner had quoting damage and is being retried with plain CLI arguments.
+- Remote compilation passed and the temporary JSON scope was created. Application construction then identified three missing CPM import-support modules in the older server copy; these are being added without exposing CPM tools over HTTP.
+- Installed the JSON policy systemd unit and 8892 Nginx configuration. Local policy health succeeded and the empty `gxp-development` scope was created; the combined verification stopped before public HTTPS because the socket check ran immediately after reload.
+- Confirmed both sockets, healthy services, JSON mode, file mode 0600, and the empty scope over public HTTPS. The first inline Python MCP count check lost URL quotes in PowerShell and will be rerun over stdin.
+- Final public verification passed: policy health and scope GET require no credentials, an unauthenticated invalid PUT reached relation-ID validation (400), and MCP negotiation returned exactly 16 remote tools with zero local Schema tools.
+- Final full regression passed 99 tests with 3 opt-in live tests skipped; compileall and `git diff --check` passed. Remote JSON is mode 0600 and contains only the empty shared scope.
+- Removed remote preflight JSON files. The executor blocked deletion of the ACL-restricted local temporary key copy after exact path validation, so it remains under the OS temp directory rather than using a shell bypass.
+- A real first local development-DB refresh exercised the hard deadline and stopped at 300 seconds with no partial snapshot. Starting metadata/candidate-only timing to identify the bottleneck.
+- Replaced per-table information-schema reads with six bulk keyset-paginated streams and replaced Cartesian candidate discovery with name/suffix indexes. Normalized legacy `ID_` as a generic key and de-duplicated identical relation endpoints.
+- Real end-to-end refresh then succeeded in about 68 seconds: 915 tables, 23 declared foreign keys, 977 candidates, and 28 trusted data-verified relationships. All candidates were attempted; two database read timeouts were excluded and classified for next-day retry.
+- Verified TTL behavior immediately afterward: the second access returned in 0.016 seconds with `refreshed=false`.
+- Final regression after performance and timeout-classification changes: 101 tests passed, 3 opt-in live tests skipped; compileall and `git diff --check` passed.

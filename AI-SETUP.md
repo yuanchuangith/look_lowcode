@@ -7,7 +7,7 @@
 - 不读取、输出、记录或通过命令参数传递平台密码和数据库密码。
 - 密码只通过隐藏输入保存到操作系统凭据存储：Windows Credential Manager、macOS Keychain 或 Linux Secret Service。
 - Linux 没有可用的安全 keyring 后端时停止配置并提示安装系统 keyring，不得回退到明文文件。
-- CPM 能力仅注册到本地 stdio；HTTP 8890 注册 16 个 Look 只读工具，本地 stdio 另含 5 个 CPM 工具，共 21 个。
+- CPM 与开发库 Schema 能力仅注册到本地 stdio；HTTP MCP 注册 16 个 Look 工具，本地 stdio 另含 5 个 CPM 工具和 7 个 Schema/可信关系工具，共 28 个。
 
 ## 前置检查
 
@@ -60,6 +60,14 @@ sh ./scripts/configure_cpm.sh
 ```
 
 配置成功会立即完成首次全量拉取。数据库连接是独立可选步骤，使用对应的 `configure_connection.ps1` 或 `configure_connection.sh`。
+
+Schema 快照需要本机数据库连接。远程否定策略使用内置 HTTPS 地址和共享 scope，全部免鉴权；新电脑安装后不需要迁移令牌。需要覆盖默认策略地址或 scope 时执行：
+
+```powershell
+./scripts/configure_schema.ps1 --policy-url https://POLICY_HOST --scope DEV_DB_SCOPE
+```
+
+macOS/Linux 使用 `sh scripts/configure_schema.sh`。首次调用 Schema 工具时生成本地快照，此后按 86400 秒 TTL 刷新。
 
 ## 验收
 

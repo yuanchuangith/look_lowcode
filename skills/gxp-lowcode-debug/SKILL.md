@@ -1,6 +1,6 @@
 ---
 name: gxp-lowcode-debug
-description: Use this skill when the user asks to 排查或复核 GXP 低代码、周期培训、公共动作、表单动作、动作名称或编号定位、流程页面反查、试卷下拉、值被清空、无可选值、文件对应试卷、岗位矩阵申请或修订、岗位培训申请、DataFilter、组件实现、请求参数、API、Controller、Service、后端异常栈、草稿保存、发布同步、动态 C# 异常、字段映射或画布节点。通过 gxp-lowcode-readonly MCP 输出页面与动作身份、发布/草稿语义、精确分组和节点、紧凑过滤事实、必要参数、生成 C# 坐标、只读证据和修改方案；不得调用或转入 gxp-lowcode-editor。仅在 MCP 命中产生源码锚点时按需读取固定前端/后端仓库。Do not use for database mutations, design edits, publication, routine feature development, or UI-only component work.
+description: Use this skill when the user asks to 排查或复核 GXP 低代码、开发库表结构或可信关系、周期培训、公共动作、表单动作、动作名称或编号定位、流程页面反查、试卷下拉、值被清空、无可选值、文件对应试卷、岗位矩阵申请或修订、岗位培训申请、DataFilter、组件实现、请求参数、API、Controller、Service、后端异常栈、草稿保存、发布同步、动态 C# 异常、字段映射或画布节点。通过 gxp-lowcode-readonly MCP 输出本地 Schema、数据验证关系、页面与动作身份、发布/草稿语义、精确分组和节点、只读证据和修改方案；不得调用或转入 gxp-lowcode-editor。
 ---
 
 # GXP Low-Code Debug
@@ -16,6 +16,21 @@ description: Use this skill when the user asks to 排查或复核 GXP 低代码�
 - 组件或编排元件参数知识按需调用 `get_cpm_knowledge`，一次只读一个白名单主题，不一次加载全部 `cpm-platform` 参考资料。
 - 输出增加 `CPM快照` 证据层。它用于候选定位，不能覆盖 Look 对当前发布副本、画布节点和业务记录的确认。
 - 数据库不可用时，可以输出明确标记的 CPM 快照候选；不得据此声称当前运行配置、发布状态或业务行为已经确认。
+
+## 开发库 Schema 快照与可信关系
+
+表、字段、备注、索引、约束或跨表关系问题，先用本地 Schema 工具；该快照来自本机可访问的开发库，不代表生产库。
+
+- `search_database_schema` 按表名、字段名和备注定位，`inspect_table_schema` 返回表结构、数据库声明外键和当前可信关系。
+- 推断关系只有在目标列唯一、类型兼容、至少 20 个不同非空来源键且全量数据 100% 匹配后，才标记为 `data_verified`。
+- 每次使用推断关系前必须同步远程否决策略；命中 `rejected` 后立即停止，不重新验证或重建，直到显式恢复。
+- 快照过期、Schema 指纹变化、关系歧义、验证失败或当前故障证据与关系冲突时，调用 `resolve_table_relation(..., force_live=true)`；以 `live_database` 结果回答本次问题，不把实时结果描述为快照关系。
+- 策略服务不可用时只展示 `declared_fk` 物理约束，推断关系标记 `尚未确认`。实时验证仍不确定时不得选择一个候选目标。
+- 只有用户明确指出某个关系错误，并且当前回答中已有该关系的 `relation_id` 时，才调用 `reject_table_relation`。普通质疑、待确认或查询失败不写永久否决。
+- `reject_table_relation` 只向免鉴权远端提交 opaque relation ID 和标准原因码；表名、字段名、Schema 与数据值留在本地。`restore_table_relation` 恢复后必须重新完成数据验证。
+- 通用关系验证只返回计数型证据；具体业务记录仍按既有门禁使用 `get_records` 的索引等值、小列集和小 limit。
+
+输出分别标记：`数据库架构快照`、`数据验证关系`、`实时数据库验证`、`远程用户否决`、`尚未确认`。
 
 ## 业务规则极性门禁与会话锚点
 

@@ -126,7 +126,7 @@ class ReadOnlySession:
         self.connection = self.pool.acquire()
         try:
             self.cursor = self.connection.cursor()
-            self.cursor.execute(f"SET SESSION MAX_EXECUTION_TIME = {self.timeout_ms:d}")
+            self.set_query_timeout(self.timeout_ms)
             self.cursor.execute("START TRANSACTION READ ONLY")
             return self
         except Exception:
@@ -134,6 +134,13 @@ class ReadOnlySession:
             self.connection = None
             self.cursor = None
             raise
+
+    def set_query_timeout(self, timeout_ms: int) -> None:
+        """Tighten the per-SELECT limit while preserving the current transaction."""
+        if self.cursor is None:
+            raise DatabaseExecutionError("Read-only session is not active")
+        self.timeout_ms = max(100, min(int(timeout_ms), 10000))
+        self.cursor.execute(f"SET SESSION MAX_EXECUTION_TIME = {self.timeout_ms:d}")
 
     def __exit__(self, exc_type, exc, traceback) -> None:
         if self.cursor is not None:

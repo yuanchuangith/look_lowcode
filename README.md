@@ -1,6 +1,6 @@
 # gxp-lowcode-readonly
 
-GXP 低代码只读诊断 MCP。服务不会执行数据库写入、画布保存或发布。Windows/macOS/Linux 本地 stdio 在 16 个 Look 工具之外增加 5 个 CPM 快照工具；公网 Streamable HTTP 8890 只注册 16 个 Look 工具，不能读取本地 CPM 凭据、调用 CLI 或触发刷新。当前工具明确区分同一动作的可编辑草稿副本与运行发布副本，并支持页面反查、动作名称、控制流树、依赖关系图、组件过滤、字段和历史发布快照定位。
+GXP 低代码只读诊断 MCP。服务不会执行数据库写入、画布保存或发布。Windows/macOS/Linux 本地 stdio 在 16 个 Look 工具之外增加 5 个 CPM 快照工具和 7 个开发库 Schema/可信关系工具，共 28 个；公网 Streamable HTTP 8890 仍只注册 16 个 Look 工具。远端另提供免鉴权的 opaque 关系否决策略 API，但不保存 Schema 或业务数据。
 
 ## CPM 本地快照定位
 
@@ -13,6 +13,33 @@ CPM 快照补充页面全貌、菜单、组件、模型、数据集、字典、�
 - `get_cpm_knowledge(...)`：只读快照中 `cpm-platform` 技能的一个白名单主题。
 
 快照超过 1800 秒时工具会同步等待刷新，单次最多 300 秒。刷新在临时副本完成后才原子换入；超时或失败保留旧快照。平台密码只从 Windows Credential Manager 固定目标 `Codex.GxpLowcodeReadonly.Cpm` 读取，并仅通过子进程环境变量传给 CLI。
+
+## 开发库 Schema 快照与可信关系
+
+本地 Schema 快照每天首次使用时刷新，读取 `information_schema` 中的表、字段、备注、索引与约束。逻辑关系只有在目标键唯一、字段类型兼容、至少 20 个不同非空来源键且开发库全量匹配率为 100% 时进入可信图谱。验证仅保存计数，不保存或上传业务值。
+
+- `schema_snapshot_status()`：查看刷新时间、Schema 指纹、关系数量和策略 revision。
+- `refresh_schema_snapshot(force=false)`：刷新本地 Schema 与全量验证关系。
+- `search_database_schema(...)` / `inspect_table_schema(...)`：按名称、备注定位并检查表结构。
+- `resolve_table_relation(...)`：关系不新鲜、歧义或冲突时实时查开发库；结果不回写每日快照。
+- `reject_table_relation(...)`：用户明确确认关系错误时写入远程永久否决。
+- `restore_table_relation(...)`：恢复一个已否决 relation ID，并强制重新验证。
+
+默认策略地址为 `https://43-135-137-212.sslip.io:8892`，共享 scope 为 `gxp-development`，新电脑安装后可直接同步否定记录。需要覆盖默认值时使用 `scripts/configure_schema.ps1` 或 `scripts/configure_schema.sh`：
+
+```powershell
+./scripts/configure_schema.ps1 --policy-url https://POLICY_HOST --scope DEV_DB_SCOPE
+```
+
+远端首次部署只需创建共享 scope：
+
+```bash
+python scripts/manage_relation_policy.py create-scope DEV_DB_SCOPE
+```
+
+策略服务使用 `GXP_RELATION_POLICY_FILE` 指定原子 JSON 文件；只保存 scope、revision、opaque relation ID、标准原因码和审计时间。所有策略 API 均免鉴权，`GXP_LOWCODE_HTTP_ALLOWED_HOSTS` 可追加 HTTPS 反向代理 Host。
+
+当前服务器可使用 `https://43-135-137-212.sslip.io:8892` 作为策略地址；Nginx 配置见 `deploy/gxp-lowcode-readonly-https-8892.conf`，它使用现有证书反向代理到本机 8890 服务。
 
 ## 页面与组件定位
 
@@ -128,4 +155,4 @@ LoadCredential=db-password:/etc/gxp-lowcode-readonly/db-password
 2. 数据库白名单/ACL 允许服务主机 `43.135.137.212` 使用专用只读账号连接。
 3. CPM 页面 Network 中请求直达 `43.135.137.212:8890/mcp`，完成 Session、CORS 和至少一次真实只读工具调用。
 
-历史服务器验收曾列出 11 个工具；当前本地 stdio 定义为 21 个工具，HTTP 入口固定为 16 个 Look 工具。远程服务需另行部署后才能具备本次能力；公网 8890 与数据库 ACL 仍是外部验收前置条件。
+历史服务器验收曾列出 11 个工具；当前本地 stdio 定义为 28 个工具，HTTP MCP 入口固定为 16 个 Look 工具。远程服务器只需为关系策略 API 提供 HTTPS 和持久化原子 JSON；开发库访问与 Schema 快照均留在本地。
