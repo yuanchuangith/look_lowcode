@@ -79,6 +79,36 @@ def _relation_matches(item: dict[str, Any], source_table: str, source_columns: l
     return True
 
 
+def _policy_allows(relation: dict[str, Any], policy: dict[str, Any]) -> bool:
+    revision = relation.get("policy_revision_at_validation")
+    if not isinstance(revision, int) or revision < 0 or revision > int(policy.get("revision", -1)):
+        return False
+    if relation.get("relation_id") in policy.get("rejections", []):
+        return False
+    if int(policy.get("protocol_version", 1)) < 2:
+        return revision == int(policy.get("revision", -1))
+    dependencies = relation.get("candidate_group_relations") or [relation.get("relation_id")]
+    return all(revision >= int(policy.get("restore_revisions", {}).get(identifier, 0)) for identifier in dependencies)
+
+
+def _candidate_resolution(attempts: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
+    completed = {"verified", "data_verified", "ambiguous", "unmatched_values", "insufficient_distinct_values", "rejected_by_policy"}
+    passed = [item for item in attempts if item.get("evidence", {}).get("passed") and item.get("status") != "rejected_by_policy"]
+    if any(item.get("candidate_truncated") or item.get("status") not in completed for item in attempts):
+        return "incomplete_candidate_validation", passed
+    return ("verified" if len(passed) == 1 else "ambiguous" if len(passed) > 1 else "not_verified"), passed
+
+
+def _apply_current_policy(attempts: list[dict[str, Any]], policy: dict[str, Any]) -> None:
+    for attempt in attempts:
+        if attempt.get("relation_id") in policy.get("rejections", []):
+            attempt["status"] = "rejected_by_policy"
+        elif attempt.get("status") == "rejected_by_policy":
+            attempt["status"] = "policy_changed"
+        elif attempt.get("evidence") and not _policy_allows(attempt, policy):
+            attempt["status"] = "policy_changed"
+
+
 class SchemaSnapshotManager:
     def __init__(
         self,
@@ -163,7 +193,7 @@ class SchemaSnapshotManager:
             if item.get("relation_id")
         }
         attempts: list[dict[str, Any]] = []
-        passed_by_source: dict[tuple[str, tuple[str, ...]], list[dict[str, Any]]] = {}
+        validation_revision = int((policy_payload or {}).get("revision", -1))
         if policy_payload is not None:
             eligible = []
             for candidate in candidates:
@@ -195,7 +225,7 @@ class SchemaSnapshotManager:
                         min_distinct_values=self.config.min_distinct_values,
                         deadline=validation_deadline,
                     )
-                    return {**candidate, "relation_id": rid, "status": evidence["reason"], "evidence": evidence}
+                    return {**candidate, "relation_id": rid, "status": evidence["reason"], "evidence": evidence, "policy_revision_at_validation": validation_revision}
                 except Exception as exc:
                     message = f"{type(exc).__name__}: {str(exc)[:160]}"
                     lowered = message.lower()
@@ -218,9 +248,7 @@ class SchemaSnapshotManager:
                         completed.add(future)
                         attempt = future.result()
                         attempts.append(attempt)
-                        if attempt.get("evidence", {}).get("passed"):
-                            key = (attempt["source_table"], tuple(attempt["source_columns"]))
-                            passed_by_source.setdefault(key, []).append(attempt)
+
             except FuturesTimeout:
                 pass
             finally:
@@ -233,12 +261,28 @@ class SchemaSnapshotManager:
                 item.get("source_table", ""), item.get("source_columns", []),
                 item.get("target_table", ""), item.get("target_columns", []),
             ))
+        if policy_payload is not None:
+            try:
+                policy_payload = self.policy.sync()
+                _apply_current_policy(attempts, policy_payload)
+            except Exception as exc:
+                policy_payload = None
+                policy_error = f"{type(exc).__name__}: {str(exc)[:160]}"
+                for attempt in attempts:
+                    attempt["status"] = "policy_unavailable"
+        groups: dict[tuple[str, tuple[str, ...]], list[dict[str, Any]]] = {}
+        for attempt in attempts:
+            groups.setdefault((attempt["source_table"], tuple(attempt["source_columns"])), []).append(attempt)
         verified: list[dict[str, Any]] = []
         verified_at = _now()
-        for _, passed in passed_by_source.items():
-            if len(passed) != 1:
-                for item in passed:
-                    item["status"] = "ambiguous"
+        for group in groups.values():
+            state, passed = _candidate_resolution(group)
+            for attempt in group:
+                attempt["group_status"] = state
+            if state != "verified":
+                if state == "ambiguous":
+                    for item in passed:
+                        item["status"] = "ambiguous"
                 continue
             item = passed[0]
             item["status"] = "data_verified"
@@ -249,6 +293,9 @@ class SchemaSnapshotManager:
                 "target_table": item["target_table"],
                 "target_columns": item["target_columns"],
                 "kind": "data_verified",
+                "candidate_group_complete": True,
+                "candidate_group_relations": [candidate["relation_id"] for candidate in group],
+                "policy_revision_at_validation": item["policy_revision_at_validation"],
                 "cardinality": "one_to_one" if item["evidence"]["source_unique"] else "many_to_one",
                 "verified_at": verified_at,
                 "schema_fingerprint": fingerprint,
@@ -375,11 +422,16 @@ class SchemaSnapshotManager:
         verified = _read_json(self.root / "relations" / "verified.json", [])
         result["relations"] = self._declared_relations_for_table(tables, table) + [
             item for item in verified
-            if item.get("relation_id") not in rejected
+            if _policy_allows(item, policy) and item.get("candidate_group_complete")
             and (item.get("source_table") == table or item.get("target_table") == table)
             and item.get("schema_fingerprint") == self._manifest().get("schema_fingerprint")
             and self._fresh(self._manifest())
         ]
+        result["unresolved_relations"] = [
+            {"source_table": item.get("source_table"), "source_columns": item.get("source_columns"), "reason": item.get("group_status")}
+            for item in _read_json(self.root / "validation-attempts.json", [])
+            if item.get("source_table") == table and item.get("group_status") not in (None, "verified", "not_verified")
+        ][:100]
         result["relation_status"] = "current_policy_applied"
         result["policy_revision"] = policy["revision"]
         return result
@@ -424,7 +476,7 @@ class SchemaSnapshotManager:
         manifest = self._manifest()
         verified = _read_json(self.root / "relations" / "verified.json", [])
         cached = [item for item in verified if _relation_matches(item, source_table, source_columns, target_table, target_columns)]
-        cached = [item for item in cached if item.get("relation_id") not in rejected]
+        cached = [item for item in cached if _policy_allows(item, policy) and item.get("candidate_group_complete")]
         if not force_live and self._fresh(manifest) and len(cached) == 1 and cached[0].get("schema_fingerprint") == manifest.get("schema_fingerprint"):
             return {"status": "data_verified", "evidence_layer": "数据验证关系", "relation": cached[0], "policy_revision": policy["revision"]}
         tables = self._load_tables()
@@ -440,7 +492,7 @@ class SchemaSnapshotManager:
             } for key in target_keys if key and len(key) == len(source_columns)] if target else []
         else:
             candidates = [item for item in generate_candidates({"tables": list(tables.values())}) if item["source_table"] == source_table and item["source_columns"] == source_columns]
-        live = []
+        attempts = []
         source_map = _column_map(source)
         for candidate in candidates:
             target = tables.get(candidate["target_table"])
@@ -454,20 +506,30 @@ class SchemaSnapshotManager:
             ):
                 continue
             rid = relation_id(self.config.policy_scope_id, source_table, source_columns, target["table_name"], target_cols)
+            attempt = {**candidate, "relation_id": rid, "policy_revision_at_validation": int(policy["revision"])}
+            attempts.append(attempt)
             if rid in rejected:
+                attempt["status"] = "rejected_by_policy"
                 continue
             try:
                 evidence = self.repository.validate_relation(
                     source_table, source_columns, target["table_name"], target_cols,
                     min_distinct_values=self.config.min_distinct_values,
                 )
-                if evidence["passed"]:
-                    live.append({**candidate, "relation_id": rid, "evidence": evidence})
+                attempt.update({"evidence": evidence, "status": evidence["reason"]})
             except Exception as exc:
-                return {"status": "unresolved", "evidence_layer": "尚未确认", "reason": "live_query_failed", "error": f"{type(exc).__name__}: {str(exc)[:160]}"}
-        if len(live) == 1:
-            return {"status": "live_verified", "evidence_layer": "实时数据库验证", "relation": live[0], "persisted": False, "policy_revision": policy["revision"]}
-        return {"status": "unresolved", "evidence_layer": "尚未确认", "reason": "ambiguous" if len(live) > 1 else "not_verified", "matches": len(live)}
+                attempt.update({"status": "verification_error", "error": f"{type(exc).__name__}: {str(exc)[:160]}"})
+        try:
+            current_policy = self.policy.sync()
+        except PolicyUnavailable as exc:
+            return {"status": "unresolved", "evidence_layer": "尚未确认", "reason": "policy_unavailable", "error": str(exc)}
+        _apply_current_policy(attempts, current_policy)
+        state, live = _candidate_resolution(attempts)
+        if state == "verified":
+            return {"status": "live_verified", "evidence_layer": "实时数据库验证", "relation": live[0], "persisted": False,
+                    "verification_scope": "explicit_target" if target_table else "source_candidates",
+                    "policy_revision": current_policy["revision"]}
+        return {"status": "unresolved", "evidence_layer": "尚未确认", "reason": state, "matches": len(live), "attempts": attempts}
 
     def reject(self, relation: str, reason_code: str = "user_confirmed_incorrect") -> dict[str, Any]:
         result = self.policy.reject(relation, reason_code)

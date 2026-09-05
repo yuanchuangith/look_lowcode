@@ -119,6 +119,25 @@ class SourceSearchTests(unittest.TestCase):
         self.assertEqual(5, sum("context" in item for item in result["files"]))
         self.assertLessEqual(len(encoded), 32 * 1024)
 
+    def test_unicode_context_and_runtime_role_ranking(self) -> None:
+        runtime = self.frontend / "src" / "core" / "components" / "培训" / "TestPaper" / "preview" / "web"
+        docs = self.frontend / "src" / "core" / "components" / "training" / "TestPaper" / "docs"
+        runtime.mkdir(parents=True)
+        docs.mkdir(parents=True)
+        (runtime / "index.tsx").write_text("export const title = '培训试卷';\n", encoding="utf-8")
+        (docs / "notes.ts").write_text("export const title = '培训试卷';\n", encoding="utf-8")
+
+        result = MODULE.search_source_evidence(
+            layer="frontend",
+            terms=["培训试卷"],
+            pairs=[],
+            frontend_repo=self.frontend,
+            backend_repo=self.backend,
+        )
+
+        self.assertEqual("src/core/components/培训/TestPaper/preview/web/index.tsx", result["files"][0]["path"])
+        self.assertIn("培训试卷", result["files"][0]["context"])
+
     def test_missing_repo_rg_unavailable_and_no_match_do_not_widen_scope(self) -> None:
         with self.assertRaises(MODULE.SourceSearchError) as missing:
             MODULE.search_source_evidence(

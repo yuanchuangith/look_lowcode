@@ -649,5 +649,6 @@ def generate_candidates(schema: dict[str, Any], *, max_targets_per_source: int =
     selected: list[dict[str, Any]] = []
     for values in grouped.values():
         values.sort(key=lambda item: (-int(item["candidate_score"]), item["target_table"], item["target_columns"]))
-        selected.extend(values[:max_targets_per_source])
+        selected.extend({**item, "candidate_count": len(values), "candidate_truncated": len(values) > max_targets_per_source}
+                        for item in values[:max_targets_per_source])
     return selected

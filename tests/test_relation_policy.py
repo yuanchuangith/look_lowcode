@@ -75,6 +75,23 @@ class RelationPolicyTests(unittest.IsolatedAsyncioTestCase):
             )
             self.assertEqual(200, restored.status_code)
 
+    async def test_protocol_upgrade_ignores_legacy_etag(self) -> None:
+        app = Starlette()
+        add_relation_policy_routes(app, self.store)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="https://policy.test") as client:
+            response = await client.get("/relation-policy/v1/scopes/shared-dev", headers={"If-None-Match": '"0"'})
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(2, response.json()["protocol_version"])
+        self.assertEqual('"policy-v2-0"', response.headers["etag"])
+
+    def test_restore_revision_survives_repeated_restore_and_reject(self) -> None:
+        self.store.reject("shared-dev", self.relation, "wrong_columns")
+        restored = self.store.restore("shared-dev", self.relation)
+        self.store.restore("shared-dev", self.relation)
+        self.store.reject("shared-dev", self.relation, "wrong_columns")
+        snapshot = self.store.snapshot("shared-dev")
+        self.assertEqual(restored["revision"], snapshot["restore_revisions"][self.relation])
+
     async def test_policy_health_starts_without_database_configuration(self) -> None:
         policy_path = Path(self.temp.name) / "standalone.json"
         with patch.dict(os.environ, {

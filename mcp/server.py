@@ -27,6 +27,15 @@ from gxp_core.schema_snapshot import (
     reject_table_relation,
     restore_table_relation,
 )
+from gxp_core.source_analysis import (
+    source_repository_status,
+    refresh_source_index,
+    inspect_component_source,
+    trace_api_contract,
+    trace_backend_call_chain,
+    inspect_dataset_usage,
+    trace_component_filter_contract,
+)
 
 
 def service() -> GxpReadonlyService:
@@ -283,11 +292,22 @@ LOCAL_SCHEMA_TOOLS = (
     restore_table_relation,
 )
 
+LOCAL_SOURCE_TOOLS = (
+    source_repository_status,
+    refresh_source_index,
+    inspect_component_source,
+    trace_api_contract,
+    trace_backend_call_chain,
+    inspect_dataset_usage,
+    trace_component_filter_contract,
+)
+
 
 def create_mcp(
     *,
     include_local_cpm: bool = True,
     include_local_schema: bool = True,
+    include_local_source: bool = True,
     **settings: Any,
 ) -> FastMCP:
     """Create one transport-specific MCP instance over the shared read-only tools."""
@@ -309,6 +329,9 @@ def create_mcp(
             app.tool()(tool)
     if include_local_schema:
         for tool in LOCAL_SCHEMA_TOOLS:
+            app.tool()(tool)
+    if include_local_source:
+        for tool in LOCAL_SOURCE_TOOLS:
             app.tool()(tool)
     return app
 

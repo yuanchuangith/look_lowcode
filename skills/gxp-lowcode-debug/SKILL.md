@@ -22,12 +22,12 @@ description: Use this skill when the user asks to 排查或复核 GXP 低代码�
 表、字段、备注、索引、约束或跨表关系问题，先用本地 Schema 工具；该快照来自本机可访问的开发库，不代表生产库。
 
 - `search_database_schema` 按表名、字段名和备注定位，`inspect_table_schema` 返回表结构、数据库声明外键和当前可信关系。
-- 推断关系只有在目标列唯一、类型兼容、至少 20 个不同非空来源键且全量数据 100% 匹配后，才标记为 `data_verified`。
+- 推断关系只有在目标列唯一、类型兼容、至少 20 个不同非空来源键且全量数据 100% 匹配后，才标记为 `data_verified`；自动选择还要求同组候选验证完整、没有截断或未决项且只有一个通过。`verification_scope=explicit_target` 仅证明指定目标匹配，不证明全局唯一。
 - 每次使用推断关系前必须同步远程否决策略；命中 `rejected` 后立即停止，不重新验证或重建，直到显式恢复。
 - 快照过期、Schema 指纹变化、关系歧义、验证失败或当前故障证据与关系冲突时，调用 `resolve_table_relation(..., force_live=true)`；以 `live_database` 结果回答本次问题，不把实时结果描述为快照关系。
 - 策略服务不可用时只展示 `declared_fk` 物理约束，推断关系标记 `尚未确认`。实时验证仍不确定时不得选择一个候选目标。
 - 只有用户明确指出某个关系错误，并且当前回答中已有该关系的 `relation_id` 时，才调用 `reject_table_relation`。普通质疑、待确认或查询失败不写永久否决。
-- `reject_table_relation` 只向免鉴权远端提交 opaque relation ID 和标准原因码；表名、字段名、Schema 与数据值留在本地。`restore_table_relation` 恢复后必须重新完成数据验证。
+- `reject_table_relation` 只向免鉴权远端提交 opaque relation ID 和标准原因码；表名、字段名、Schema 与数据值留在本地。`restore_table_relation` 恢复后必须重新完成数据验证；协议 v2 按恢复版本让所有机器上的旧验证失效，同组竞争候选恢复也会使旧唯一性失效。
 - 通用关系验证只返回计数型证据；具体业务记录仍按既有门禁使用 `get_records` 的索引等值、小列集和小 limit。
 
 输出分别标记：`数据库架构快照`、`数据验证关系`、`实时数据库验证`、`远程用户否决`、`尚未确认`。
@@ -106,9 +106,9 @@ description: Use this skill when the user asks to 排查或复核 GXP 低代码�
 - 仅缺少真实交互状态且没有精确源码锚点：按运行页面证据流程升级浏览器，不扫描仓库。
 - 纯 UI 样式、渲染或组件交互实现问题转交 `gxp-component-debug`。
 
-门禁成立时完整读取 `references/source-code-evidence.md`，然后只用其受限脚本和 `source_hints` 给出的层级、`exact_terms`、`paired_terms` 搜索。找不到结果时不得扩大到其他目录。源码只读，不默认构建、格式化或修改。
+门禁成立时完整读取 `references/source-code-evidence.md`。优先按锚点调用本地结构化源码工具；只有结构化工具尚未覆盖且 `source_hints` 含精确词时，才使用兼容搜索脚本。找不到结果时不得扩大到其他目录。源码只读，不默认构建、格式化或修改。
 
-输出时分层标记证据：`低代码`、`前端源码`、`后端源码`、`业务数据`、`页面运行`、`尚未验证`。静态源码命中不能写成运行验收通过。
+输出时分层标记证据：`低代码`、`前端源码`、`后端源码`、`业务数据`、`页面运行`、`尚未验证`。静态源码命中不能写成运行验收通过。源码层返回 `partial/unresolved`、仓库歧义或 stale 时保留原因；有效层证据可单独引用，但不得补成跨层确定结论。
 
 ## 精确排查流程
 
@@ -131,7 +131,7 @@ description: Use this skill when the user asks to 排查或复核 GXP 低代码�
 8. 沿 `CallPublicAction`、`CallAction` 继续追踪，直到数据库读写、显式返回或首个异常点。
 9. 业务表先 `describe_table`，再 `get_records` 使用索引等值条件、小列集和小 `limit`。
 10. 用 `references/report-contract.md` 输出结论；不要省略定位字段或写“同上”。
-11. 只有命中“源码升级门禁”时，才按 `source_hints` 受限读取前端、后端或两端源码；否则明确写“低代码证据已足够，无需查源码”。
+11. 只有命中“源码升级门禁”时，才按组件、API、后端栈或数据集锚点调用对应本地源码工具；否则明确写“低代码证据已足够，无需查源码”。
 
 ## 问题输出格式门禁
 

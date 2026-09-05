@@ -1,0 +1,192 @@
+{
+  "date": "2026-09-05",
+  "rounds": 5,
+  "method": "Same preserved baseline and repaired implementation, sequential five-build/five-query runs after installation completed; no installer running concurrently. All samples retained.",
+  "repositories": {
+    "frontend": {
+      "status": "valid",
+      "path": "F:\\cpm\\gxp2.components",
+      "branch": "develop",
+      "commit": "043c5632b57cee829872d67f815c9a1676ce0a25",
+      "remote_fingerprint": "80315b59495c47daf9c7737e1cfd0fcde64946a3c20719e646ff10aa396a02cb",
+      "dirty_file_count": 0,
+      "dirty_files": [],
+      "fingerprint": "252b3c9c56b3814cd4c1f1082de4786b2ef374d4b0bdb78b92863a34583c6224"
+    },
+    "backend": {
+      "status": "valid",
+      "path": "F:\\cpm\\gxp2.web",
+      "branch": "develop",
+      "commit": "9e9a843e56490f135cf1ea4fd41af3077ac65728",
+      "remote_fingerprint": "166ade555c3a019a2baa9e4ef43454b2b78d5349d2ea08731f1c01ded5e81c3a",
+      "dirty_file_count": 0,
+      "dirty_files": [],
+      "fingerprint": "397a22b48ae94ac04c56edc566edc683f7f796054320f56d5ed94777c2a7e98b"
+    }
+  },
+  "baseline": {
+    "timings": {
+      "build": [
+        40.21524639999916,
+        3.0145895999994536,
+        2.9882467000006727,
+        2.9879487000016525,
+        3.0227124000011827
+      ],
+      "query": [
+        1.6265224999988277,
+        1.4769427999999607,
+        1.467795799999294,
+        1.4994611000001896,
+        1.4595042999990255
+      ]
+    },
+    "medians": {
+      "build": 3.0145895999994536,
+      "query": 1.4769427999999607
+    },
+    "request_count": 967,
+    "line_comment_requests": 17,
+    "payload_bytes": {
+      "component": 39623,
+      "save": 3715,
+      "search": 5846,
+      "backend": 22599,
+      "filter": 4045
+    }
+  },
+  "repaired": {
+    "timings": {
+      "build": [
+        3.2208780000000843,
+        3.3616772000004858,
+        3.301105999998981,
+        3.413528300001417,
+        3.3303071999998792
+      ],
+      "query": [
+        1.0360755999990943,
+        1.0022907000002306,
+        0.9611225000007835,
+        0.9619634000009682,
+        1.0033137999998871
+      ]
+    },
+    "medians": {
+      "build": 3.3303071999998792,
+      "query": 1.0022907000002306
+    },
+    "request_count": 461,
+    "line_comment_requests": 0,
+    "payload_bytes": {
+      "component": 24534,
+      "save": 5143,
+      "search": 7774,
+      "backend": 8433,
+      "filter": 3324
+    }
+  },
+  "percent_change": {
+    "build": 10.472987765912901,
+    "query": -32.137473434972755
+  },
+  "original_baseline": {
+    "timings": {
+      "build": [
+        2.9911610000008295,
+        2.999977499999659,
+        3.004558700000416,
+        3.0312685999997484,
+        3.0354287999998633
+      ],
+      "query": [
+        1.5358335999999326,
+        1.4772972999999183,
+        1.4566760999996404,
+        1.4933108999994147,
+        1.4900588000000425
+      ]
+    },
+    "medians": {
+      "build": 3.004558700000416,
+      "query": 1.4900588000000425
+    },
+    "request_count": 967,
+    "line_comment_requests": 17,
+    "payload_bytes": {
+      "component": 39623,
+      "save": 3715,
+      "search": 5846,
+      "backend": 22599,
+      "filter": 4045
+    }
+  },
+  "notes": [
+    "Paired baseline first build took 40.215 seconds; retained in the five samples rather than silently discarded. Its cause was not isolated.",
+    "The final-stdio-benchmark run overlapped plugin installation and is not the controlled comparison; it is retained in the external baseline directory.",
+    "Request counts describe index output, not a percentage accuracy measurement."
+  ],
+  "golden": {
+    "component": {
+      "status": "ok"
+    },
+    "save": {
+      "status": "ok",
+      "contract_status": "wrapper_unresolved",
+      "frontend_callers": 3,
+      "implementations": [
+        "DataSetServices.BatchSaveData"
+      ]
+    },
+    "search": {
+      "status": "ok",
+      "contract_status": "wrapper_unresolved",
+      "frontend_callers": 2,
+      "implementations": [
+        "DataSetServices.QueryDataCenter"
+      ]
+    },
+    "backend": {
+      "status": "ok",
+      "data_access": [
+        {
+          "receiver": "ctx",
+          "type": "ZeroDbContext",
+          "operation": "insert",
+          "source": {
+            "factory": "GxP2.Services.ServicesBase.GetZeroDbContext(string,TableDescriptor)",
+            "path": "GxP2.Services/Base/ServicesBase.cs",
+            "line": 391
+          }
+        },
+        {
+          "receiver": "ctx",
+          "type": "ZeroDbContext",
+          "operation": "update",
+          "source": {
+            "factory": "GxP2.Services.ServicesBase.GetZeroDbContext(string,TableDescriptor)",
+            "path": "GxP2.Services/Base/ServicesBase.cs",
+            "line": 391
+          }
+        }
+      ]
+    },
+    "filter": {
+      "status": "ok",
+      "historical_name_reversal": [
+        {
+          "canvas_parameter": "dynamicWhere",
+          "component_property": "conditionFilter",
+          "meaning": "SQL 字符串",
+          "confidence": "structural"
+        },
+        {
+          "canvas_parameter": "staticWhere",
+          "component_property": "dynamicFilter",
+          "meaning": "JSON 条件",
+          "confidence": "structural"
+        }
+      ]
+    }
+  }
+}

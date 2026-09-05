@@ -1,6 +1,6 @@
 # gxp-lowcode-readonly
 
-GXP 低代码只读诊断 MCP。服务不会执行数据库写入、画布保存或发布。Windows/macOS/Linux 本地 stdio 在 16 个 Look 工具之外增加 5 个 CPM 快照工具和 7 个开发库 Schema/可信关系工具，共 28 个；公网 Streamable HTTP 8890 仍只注册 16 个 Look 工具。远端另提供免鉴权的 opaque 关系否决策略 API，但不保存 Schema 或业务数据。
+GXP 低代码只读诊断 MCP。服务不会执行数据库写入、画布保存或发布。Windows/macOS/Linux 本地 stdio 包含 16 个 Look 工具、5 个 CPM 快照工具、7 个开发库 Schema/可信关系工具和 7 个本地源码业务链工具，共 35 个；公网 Streamable HTTP 8890 仍只注册 16 个 Look 工具。远端另提供免鉴权的 opaque 关系否决策略 API，但不保存 Schema、源码或业务数据。
 
 ## CPM 本地快照定位
 
@@ -41,6 +41,16 @@ python scripts/manage_relation_policy.py create-scope DEV_DB_SCOPE
 
 当前服务器可使用 `https://43-135-137-212.sslip.io:8892` 作为策略地址；Nginx 配置见 `deploy/gxp-lowcode-readonly-https-8892.conf`，它使用现有证书反向代理到本机 8890 服务。
 
+## 可信门禁与兼容升级
+
+- 源码索引 v3 自动按需重建；旧 layer、仓库歧义、源文件变化或索引代次冲突返回明确状态，健康 layer 的结果保留。
+- 前端请求通过词法边界与函数作用域解析；后端通过全限定符号、签名和接收类型连接，保留包装器不确定性与未解析调用。
+- 自动关系要求同组候选验证完整；超时、异常、截断均不等同于排除候选。显式目标验证通过返回 `verification_scope=explicit_target`。
+- 关系策略协议 v2 增加逐关系恢复版本；恢复会使各机器旧验证失效，同组竞争候选恢复也会使旧唯一性失效。旧表结构缓存保留、旧关系按需重验。
+- 服务先升级，再安装客户端。新客户端连接旧服务按 scope revision 保守失效；回退服务代码时保留最新策略 JSON 与审计。
+
+协议与验收说明见 `docs/optimization-repair-contract.md`。
+
 ## 页面与组件定位
 
 - `search_pages(query, limit=20)`：先按 Route/Id/OutId、中文显示名精确或包含匹配；无结果时只在命中中文二元词的有界候选中排序，不读取整个应用页面列表。
@@ -60,7 +70,22 @@ python scripts/manage_relation_policy.py create-scope DEV_DB_SCOPE
 - `CallAction`/`CallPublicAction` 只建议继续追踪低代码动作。
 - 动态生成类名不会进入本地源码关键词。
 
-Skill 仅在低代码证据不足且 `source_hints.candidate_layers` 非空时调用 `skills/gxp-lowcode-debug/scripts/search_source_evidence.py`。脚本固定只读 `G:\hoyi\updateComponents\gxp2.components` 与 `G:\hoyi\updateWeb\gxp2.web`，使用 `rg` 搜索，排除依赖、构建、缓存和生成目录；最多返回 20 个文件、前 5 个文件上下文，JSON 不超过 32 KB。它不联网、不构建、不修改文件，也不会在无命中时扩大目录。
+Skill 仅在低代码证据不足且 `source_hints.candidate_layers` 非空时使用本地源码能力。默认同时保留 F/G 两套仓库候选，多个不同 commit/remote 的副本要求显式 preferred；不会向其他目录扩散。
+
+- `source_repository_status()` / `refresh_source_index(force=false)`：查看候选 Git 身份并原子刷新本地元数据索引。
+- `inspect_component_source(...)`：检查组件 designer、runtime、API、注册、模型与过滤契约。
+- `trace_api_contract(...)`：串联前端调用、组合 Route、Controller、DTO 和 Service；外部包装器未知时返回 `wrapper_unresolved`。
+- `trace_backend_call_chain(...)`：从 Controller/Service/异常栈追踪有源码证据的调用边和异常流。
+- `inspect_dataset_usage(...)`：区分数据集定义、发布引用与不影响运行的草稿引用。
+- `trace_component_filter_contract(...)`：核对 DataFilter 到前后端过滤字段的历史命名反转。
+
+索引位于系统数据目录的 `GxpLowcodeReadonly/source-index/`，只保存路径、符号、路由、DTO、组件契约和调用边，不保存源码正文。兼容脚本 `skills/gxp-lowcode-debug/scripts/search_source_evidence.py` 只用于结构化工具未覆盖的窄检索。
+
+额外仓库或 preferred 配置：
+
+```powershell
+./scripts/configure_source_repositories.ps1 --frontend F:\cpm\gxp2.components --frontend G:\hoyi\updateComponents\gxp2.components --preferred-frontend F:\cpm\gxp2.components --backend F:\cpm\gxp2.web --backend G:\hoyi\updateWeb\gxp2.web --preferred-backend F:\cpm\gxp2.web
+```
 
 ## 运行方式
 
@@ -155,4 +180,4 @@ LoadCredential=db-password:/etc/gxp-lowcode-readonly/db-password
 2. 数据库白名单/ACL 允许服务主机 `43.135.137.212` 使用专用只读账号连接。
 3. CPM 页面 Network 中请求直达 `43.135.137.212:8890/mcp`，完成 Session、CORS 和至少一次真实只读工具调用。
 
-历史服务器验收曾列出 11 个工具；当前本地 stdio 定义为 28 个工具，HTTP MCP 入口固定为 16 个 Look 工具。远程服务器只需为关系策略 API 提供 HTTPS 和持久化原子 JSON；开发库访问与 Schema 快照均留在本地。
+历史服务器验收曾列出 11 个工具；当前本地 stdio 定义为 35 个工具，HTTP MCP 入口固定为 16 个 Look 工具。远程服务器只需为关系策略 API 提供 HTTPS 和持久化原子 JSON；开发库访问、Schema 快照和源码索引均留在本地。

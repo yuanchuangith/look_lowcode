@@ -51,6 +51,17 @@ class SourceHintTests(unittest.TestCase):
         self.assertIn("backend_stack_frame", hints["reason_codes"])
         self.assertIn("TrainingTaskService", hints["exact_terms"])
         self.assertIn("Complete", hints["exact_terms"])
+        self.assertEqual(2, hints["hint_version"])
+
+    def test_plural_services_stack_has_searchable_exact_terms(self) -> None:
+        hints = build_source_hints(
+            text="at GxP2.Services.Data.DataSetServices.BatchSaveData(String id) in DataSetServices.cs:line 52"
+        )
+
+        self.assertEqual("high", hints["confidence"])
+        self.assertIn("DataSetServices", hints["exact_terms"])
+        self.assertIn("BatchSaveData", hints["exact_terms"])
+        self.assertNotIn("missing_search_term", hints["reason_codes"])
 
     def test_opaque_component_model_id_is_anchor_only_not_search_term(self) -> None:
         hints = build_source_hints(

@@ -2,26 +2,39 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, Iterable
 
+PLUGIN_ROOT = Path(__file__).resolve().parents[3]
+MCP_ROOT = PLUGIN_ROOT / "mcp"
+if str(MCP_ROOT) not in sys.path:
+    sys.path.insert(0, str(MCP_ROOT))
 
-DEFAULT_FRONTEND_REPO = Path(r"G:\hoyi\updateComponents\gxp2.components")
-DEFAULT_BACKEND_REPO = Path(r"G:\hoyi\updateWeb\gxp2.web")
+from gxp_core.source_config import SourceRepositoryError, resolve_repository
+
+
 MAX_EXACT_TERMS = 8
 MAX_PAIRS = 4
 MAX_FILES = 20
 MAX_CONTEXT_FILES = 5
 MAX_RESPONSE_BYTES = 32 * 1024
 MAX_TERM_LENGTH = 160
+SEARCH_DEADLINE_SECONDS = 30
 EXCLUDED_GLOBS = (
+    "!.git/**",
     "!**/.git/**",
+    "!node_modules/**",
     "!**/node_modules/**",
+    "!dist/**",
     "!**/dist/**",
+    "!bin/**",
     "!**/bin/**",
+    "!obj/**",
     "!**/obj/**",
     "!**/.cache/**",
     "!**/cache/**",
@@ -31,6 +44,14 @@ EXCLUDED_GLOBS = (
     "!**/out/**",
     "!**/generated/**",
 )
+SOURCE_GLOBS = {
+    "frontend": ("*.ts", "*.tsx", "*.js", "*.jsx", "*.vue"),
+    "backend": ("*.cs",),
+}
+SOURCE_ROOTS = {
+    "frontend": ("src/core/components", "src/core/common", "src/core/entry", "src/basic"),
+    "backend": ("GxP2.Web/Controllers", "GxP2.IServices", "GxP2.Services", "GxP2.Model/Dto"),
+}
 
 
 class SourceSearchError(RuntimeError):
@@ -56,83 +77,124 @@ def _unique(values: Iterable[str], limit: int) -> list[str]:
     return result
 
 
-def _run(arguments: list[str], *, cwd: Path, timeout: int = 30) -> subprocess.CompletedProcess[str]:
+def _run(arguments: list[str], *, cwd: Path, timeout: float = SEARCH_DEADLINE_SECONDS) -> subprocess.CompletedProcess[bytes]:
+    flags = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
     return subprocess.run(
         arguments,
         cwd=cwd,
         capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-        timeout=timeout,
+        timeout=max(0.1, timeout),
+        creationflags=flags,
         check=False,
     )
 
 
-def _repository_metadata(repo: Path) -> dict[str, Any]:
-    root = _run(["git", "rev-parse", "--show-toplevel"], cwd=repo)
-    if root.returncode != 0:
-        raise SourceSearchError("not_git_repository", f"Source repository is not a readable Git checkout: {repo}")
-    resolved_root = Path(root.stdout.strip()).resolve()
-    if resolved_root != repo.resolve():
-        raise SourceSearchError(
-            "repository_root_mismatch",
-            f"Source repository override must point to its Git root: {repo}",
-        )
-    commit = _run(["git", "rev-parse", "HEAD"], cwd=repo)
-    branch = _run(["git", "branch", "--show-current"], cwd=repo)
-    status = _run(["git", "status", "--porcelain=v1", "--untracked-files=all"], cwd=repo)
-    if any(item.returncode != 0 for item in (commit, branch, status)):
-        raise SourceSearchError("git_metadata_failed", f"Cannot read source repository metadata: {repo}")
-    dirty_lines = [line for line in status.stdout.splitlines() if line.strip()]
-    return {
-        "path": str(resolved_root),
-        "branch": branch.stdout.strip() or "DETACHED",
-        "commit": commit.stdout.strip(),
-        "dirty_file_count": len(dirty_lines),
-    }
-
-
-def _rg_base(rg: str) -> list[str]:
+def _rg_base(rg: str, layer: str) -> list[str]:
     arguments = [rg, "--hidden", "--no-messages"]
+    for pattern in SOURCE_GLOBS[layer]:
+        arguments.extend(["--glob", pattern])
     for pattern in EXCLUDED_GLOBS:
         arguments.extend(["--glob", pattern])
     return arguments
 
 
-def _matching_files(rg: str, repo: Path, term: str) -> list[str]:
+def _search_roots(repo: Path, layer: str) -> list[str]:
+    roots = [item for item in SOURCE_ROOTS[layer] if (repo / item).is_dir()]
+    return roots or ["."]
+
+
+def _json_events(output: bytes) -> Iterable[dict[str, Any]]:
+    for raw in output.splitlines():
+        if not raw.strip():
+            continue
+        try:
+            event = json.loads(raw)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if isinstance(event, dict):
+            yield event
+
+
+def _matching_files(rg: str, repo: Path, layer: str, term: str, timeout: float) -> list[str]:
     result = _run(
-        [*_rg_base(rg), "--files-with-matches", "--fixed-strings", "--ignore-case", "--null", "--", term, "."],
+        [
+            *_rg_base(rg, layer),
+            "--files-with-matches",
+            "--fixed-strings",
+            "--ignore-case",
+            "--null",
+            "--",
+            term,
+            *_search_roots(repo, layer),
+        ],
         cwd=repo,
+        timeout=timeout,
     )
     if result.returncode not in (0, 1):
-        raise SourceSearchError("rg_failed", f"rg failed in {repo}: {result.stderr.strip()[:300]}")
+        stderr = result.stderr.decode("utf-8", errors="replace").strip()[:300]
+        raise SourceSearchError("rg_failed", f"rg failed in {repo}: {stderr}")
     return [
-        Path(item).as_posix().removeprefix("./")
-        for item in result.stdout.split("\0")
-        if item.strip()
+        Path(raw.decode("utf-8", errors="surrogateescape")).as_posix().removeprefix("./")
+        for raw in result.stdout.split(b"\0")
+        if raw.strip()
     ]
 
 
-def _file_context(rg: str, repo: Path, relative_path: str, terms: list[str], lines: int) -> str:
+def _file_context(rg: str, repo: Path, layer: str, relative_path: str, terms: list[str], lines: int, timeout: float) -> str:
     arguments = [
-        *_rg_base(rg),
-        "--line-number",
-        "--with-filename",
+        *_rg_base(rg, layer),
+        "--json",
         "--fixed-strings",
         "--ignore-case",
         "--max-count",
         "20",
-        "--context",
-        str(lines),
     ]
     for term in terms:
         arguments.extend(["-e", term])
     arguments.extend(["--", relative_path])
-    result = _run(arguments, cwd=repo)
+    result = _run(arguments, cwd=repo, timeout=timeout)
     if result.returncode not in (0, 1):
         raise SourceSearchError("rg_context_failed", f"rg context read failed for {relative_path}")
-    return result.stdout[:8192]
+    matched_lines: list[int] = []
+    for event in _json_events(result.stdout):
+        if event.get("type") == "match":
+            line_number = (event.get("data") or {}).get("line_number")
+            if isinstance(line_number, int):
+                matched_lines.append(line_number)
+    try:
+        source_lines = (repo / relative_path).read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return ""
+    selected: set[int] = set()
+    for line_number in matched_lines:
+        selected.update(range(max(1, line_number - lines), min(len(source_lines), line_number + lines) + 1))
+    rendered = [f"{relative_path}:{index}:{source_lines[index - 1]}" for index in sorted(selected)]
+    return "\n".join(rendered)[:8192]
+
+
+def _role_rank(layer: str, path: str) -> int:
+    value = path.replace("\\", "/").casefold()
+    if any(part in value for part in ("/docs/", "/knowledge/", "/codemaps/")):
+        return 90
+    if layer == "frontend":
+        if "/preview/web/" in value or "/preview/wap/" in value:
+            return 0
+        if "/designer/" in value:
+            return 1
+        if value.endswith(("/api.ts", "/service.ts", "/api.tsx", "/service.tsx")):
+            return 2
+        if "/components/" in value:
+            return 3
+        return 10
+    if "/controllers/" in value:
+        return 0
+    if "/gxp2.services/" in value or value.startswith("gxp2.services/"):
+        return 1
+    if "/gxp2.iservices/" in value or value.startswith("gxp2.iservices/"):
+        return 2
+    if "/dto/" in value:
+        return 3
+    return 10
 
 
 def _bounded(result: dict[str, Any]) -> dict[str, Any]:
@@ -160,8 +222,8 @@ def search_source_evidence(
     layer: str,
     terms: list[str],
     pairs: list[list[str]],
-    frontend_repo: Path = DEFAULT_FRONTEND_REPO,
-    backend_repo: Path = DEFAULT_BACKEND_REPO,
+    frontend_repo: Path | None = None,
+    backend_repo: Path | None = None,
     context_lines: int = 3,
     rg_path: str | None = None,
 ) -> dict[str, Any]:
@@ -179,23 +241,39 @@ def search_source_evidence(
     if not rg:
         raise SourceSearchError("rg_unavailable", "rg is required; source scope was not expanded")
 
-    repositories: list[tuple[str, Path]] = []
+    repositories: list[tuple[str, Path, dict[str, Any]]] = []
     if layer in {"frontend", "both"}:
-        repositories.append(("frontend", frontend_repo.expanduser().resolve()))
+        try:
+            resolved = resolve_repository("frontend", override=frontend_repo)
+        except SourceRepositoryError as exc:
+            raise SourceSearchError(exc.code.casefold(), str(exc)) from exc
+        repositories.append(("frontend", Path(resolved["selected"]["path"]), resolved))
     if layer in {"backend", "both"}:
-        repositories.append(("backend", backend_repo.expanduser().resolve()))
-    for _, repo in repositories:
-        if not repo.is_dir():
-            raise SourceSearchError("repository_not_found", f"Configured source repository was not found: {repo}")
+        try:
+            resolved = resolve_repository("backend", override=backend_repo)
+        except SourceRepositoryError as exc:
+            raise SourceSearchError(exc.code.casefold(), str(exc)) from exc
+        repositories.append(("backend", Path(resolved["selected"]["path"]), resolved))
 
     all_terms = _unique([*exact_terms, *(term for pair in clean_pairs for term in pair)], MAX_EXACT_TERMS + MAX_PAIRS * 2)
     repository_info = []
     hits: list[dict[str, Any]] = []
-    for repo_layer, repo in repositories:
-        repository_info.append({"layer": repo_layer, **_repository_metadata(repo)})
+    deadline = time.monotonic() + SEARCH_DEADLINE_SECONDS
+    truncated_reason: str | None = None
+    for repo_layer, repo, resolution in repositories:
+        repository_info.append({"layer": repo_layer, **resolution["selected"], "mirrors": resolution["mirrors"]})
         matched_by_path: dict[str, set[str]] = {}
         for term in all_terms:
-            for path in _matching_files(rg, repo, term):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                truncated_reason = "deadline"
+                break
+            try:
+                paths = _matching_files(rg, repo, repo_layer, term, remaining)
+            except subprocess.TimeoutExpired:
+                truncated_reason = "deadline"
+                break
+            for path in paths:
                 matched_by_path.setdefault(path, set()).add(term)
         for path, matched in matched_by_path.items():
             exact_matches = [term for term in exact_terms if term in matched]
@@ -213,16 +291,30 @@ def search_source_evidence(
                 }
             )
 
-    hits.sort(key=lambda item: (-item["matched_term_count"], item["path"].casefold(), item["layer"]))
+    hits.sort(
+        key=lambda item: (
+            -item["matched_term_count"],
+            _role_rank(item["layer"], item["path"]),
+            -len(item["matched_pairs"]),
+            item["path"].casefold(),
+            item["layer"],
+        )
+    )
     total_file_count = len(hits)
     hits = hits[:MAX_FILES]
     for hit in hits[:MAX_CONTEXT_FILES]:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            truncated_reason = "deadline"
+            break
         hit["context"] = _file_context(
             rg,
             Path(hit["repository"]),
+            hit["layer"],
             hit["path"],
             hit["matched_terms"],
             max(0, min(int(context_lines), 10)),
+            remaining,
         )
     result = {
         "status": "ok" if hits else "no_matches",
@@ -241,6 +333,8 @@ def search_source_evidence(
         "contexts_truncated": len(hits) > MAX_CONTEXT_FILES,
         "files": hits,
     }
+    if truncated_reason:
+        result["truncated_reason"] = truncated_reason
     if not hits:
         result["error"] = {
             "code": "no_matches",
@@ -254,8 +348,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--layer", choices=("frontend", "backend", "both"), required=True)
     parser.add_argument("--term", action="append", default=[])
     parser.add_argument("--pair", action="append", nargs=2, metavar=("FIRST", "SECOND"), default=[])
-    parser.add_argument("--frontend-repo", type=Path, default=DEFAULT_FRONTEND_REPO)
-    parser.add_argument("--backend-repo", type=Path, default=DEFAULT_BACKEND_REPO)
+    parser.add_argument("--frontend-repo", type=Path)
+    parser.add_argument("--backend-repo", type=Path)
     parser.add_argument("--context-lines", type=int, default=3)
     return parser
 

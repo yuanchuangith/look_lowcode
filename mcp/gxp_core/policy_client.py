@@ -86,45 +86,57 @@ class RelationPolicyClient:
 
     def sync(self) -> dict[str, Any]:
         cache = self._load_cache()
-        etag = f'"{cache["revision"]}"' if int(cache.get("revision", -1)) >= 0 else None
-        status, payload, _ = self._request(
+        etag = cache.get("etag")
+        status, payload, response_etag = self._request(
             "GET", f"/relation-policy/v1/scopes/{self.config.policy_scope_id}", etag=etag
         )
         if status == 304:
+            if not etag or int(cache.get("revision", -1)) < 0:
+                raise PolicyUnavailable("relation policy returned 304 without a complete cached snapshot")
             cache["fetched_at"] = _now()
             _atomic_json(self.cache_path, cache)
             return cache
         if not payload or payload.get("scope_id") != self.config.policy_scope_id:
             raise PolicyUnavailable("relation policy returned an invalid scope payload")
-        normalized = {
-            "scope_id": self.config.policy_scope_id,
-            "revision": int(payload.get("revision", 0)),
-            "rejections": sorted({str(item["relation_id"]) for item in payload.get("rejections", [])}),
-            "fetched_at": _now(),
-        }
+        try:
+            version = int(payload.get("protocol_version", 1))
+            restores = payload["restore_revisions"] if version >= 2 else {}
+            revision = int(payload["revision"])
+            restores = {str(relation): int(value) for relation, value in restores.items()}
+            if any(value < 0 or value > revision for value in restores.values()):
+                raise ValueError("invalid restore revision")
+            normalized = {
+                "scope_id": self.config.policy_scope_id,
+                "revision": revision,
+                "protocol_version": version,
+                "restore_revisions": restores,
+                "etag": response_etag,
+                "rejections": sorted({str(item["relation_id"]) for item in payload.get("rejections", [])}),
+                "fetched_at": _now(),
+            }
+        except (KeyError, TypeError, ValueError, AttributeError) as exc:
+            raise PolicyUnavailable("relation policy returned invalid version metadata") from exc
         _atomic_json(self.cache_path, normalized)
         return normalized
 
+    def _resync_after_mutation(self) -> None:
+        cache = self._load_cache()
+        cache["etag"] = None
+        cache["revision"] = -1
+        _atomic_json(self.cache_path, cache)
+        self.sync()
+
     def reject(self, relation: str, reason_code: str) -> dict[str, Any]:
         _, payload, _ = self._request(
-            "PUT",
-            f"/relation-policy/v1/scopes/{self.config.policy_scope_id}/relations/{relation}",
+            "PUT", f"/relation-policy/v1/scopes/{self.config.policy_scope_id}/relations/{relation}",
             body={"reason_code": reason_code},
         )
-        cache = self._load_cache()
-        cache["revision"] = int((payload or {}).get("revision", cache.get("revision", 0)))
-        cache["rejections"] = sorted(set(cache.get("rejections", [])) | {relation})
-        cache["fetched_at"] = _now()
-        _atomic_json(self.cache_path, cache)
+        self._resync_after_mutation()
         return payload or {}
 
     def restore(self, relation: str) -> dict[str, Any]:
         _, payload, _ = self._request(
             "DELETE", f"/relation-policy/v1/scopes/{self.config.policy_scope_id}/relations/{relation}"
         )
-        cache = self._load_cache()
-        cache["revision"] = int((payload or {}).get("revision", cache.get("revision", 0)))
-        cache["rejections"] = sorted(set(cache.get("rejections", [])) - {relation})
-        cache["fetched_at"] = _now()
-        _atomic_json(self.cache_path, cache)
+        self._resync_after_mutation()
         return payload or {}

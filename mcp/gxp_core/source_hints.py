@@ -10,6 +10,7 @@ MAX_EXACT_TERMS = 8
 MAX_PAIRED_TERMS = 4
 MAX_ANCHOR_VALUES = 8
 MAX_VALUE_LENGTH = 160
+HINT_VERSION = 2
 
 BACKEND_STACK_FRAME = re.compile(
     r"\bat\s+(?P<type>GxP2(?:\.[A-Za-z_]\w*)+)\.(?P<method>[A-Za-z_]\w*)\s*\(",
@@ -25,8 +26,9 @@ API_ROUTE = re.compile(
 )
 SERVICE_SYMBOL = re.compile(
     r"\b(?P<symbol>(?:GxP2\.)?[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*"
-    r"(?:Controller|Service|ServiceBase)(?:\.[A-Za-z_]\w*)?)\b"
+    r"(?:Controller|Services?|ServiceBase)(?:\.[A-Za-z_]\w*)?)\b"
 )
+SERVICE_TYPE = re.compile(r"^(?:I?[A-Za-z_]\w*(?:Services?|ServiceBase)|[A-Za-z_]\w*Controller)$")
 
 
 def _clean(value: Any) -> str:
@@ -64,7 +66,7 @@ def _symbol_source_terms(symbols: Iterable[str]) -> list[str]:
     for symbol in symbols:
         parts = [part for part in re.split(r"[.:]", symbol) if part]
         for index, part in enumerate(parts):
-            if re.search(r"(?:Controller|Service|ServiceBase)$", part):
+            if SERVICE_TYPE.fullmatch(part):
                 terms.append(part)
                 if index + 1 < len(parts):
                     terms.append(parts[index + 1])
@@ -260,9 +262,12 @@ def build_source_hints(
     )
 
     backend_frames = []
+    backend_frame_terms: list[str] = []
     for match in BACKEND_STACK_FRAME.finditer(text):
         symbol = f"{match.group('type')}.{match.group('method')}"
         backend_frames.append(symbol)
+        short_type = match.group("type").rsplit(".", 1)[-1]
+        backend_frame_terms.extend((symbol, short_type, match.group("method"), f"{short_type}.cs"))
     backend_frames = _unique(backend_frames, limit=MAX_ANCHOR_VALUES)
     if backend_frames:
         candidate_layers.append("backend")
@@ -275,7 +280,10 @@ def build_source_hints(
     if service_symbols:
         candidate_layers.append("backend")
         reason_codes.append("backend_service_symbol")
+        exact_terms.extend(backend_frame_terms)
         exact_terms.extend(_symbol_source_terms(service_symbols))
+    if api_routes:
+        exact_terms.extend(route.rstrip("/").rsplit("/", 1)[-1] for route in api_routes)
 
     frontend_files = _unique(
         (match.group("path").replace("\\", "/") for match in FRONTEND_STACK_FILE.finditer(text)),
@@ -317,18 +325,24 @@ def build_source_hints(
     candidate_layers = _unique(candidate_layers, limit=2)
     if len(candidate_layers) == 2:
         reason_codes.append("request_contract_cross_layer")
+    confidence = (
+        "high"
+        if backend_frames or api_routes or _clean(component.get("component_type"))
+        else "medium"
+        if candidate_layers
+        else "low"
+    )
+    exact_terms = _unique(exact_terms, limit=MAX_EXACT_TERMS)
+    if confidence == "high" and not exact_terms:
+        confidence = "medium"
+        reason_codes.append("missing_search_term")
     hints = {
+        "hint_version": HINT_VERSION,
         "candidate_layers": candidate_layers,
         "reason_codes": _unique(reason_codes, limit=8),
         "anchors": anchors,
-        "exact_terms": _unique(exact_terms, limit=MAX_EXACT_TERMS),
+        "exact_terms": exact_terms,
         "paired_terms": _structured_pairs(combined),
-        "confidence": (
-            "high"
-            if backend_frames or api_routes or _clean(component.get("component_type"))
-            else "medium"
-            if candidate_layers
-            else "low"
-        ),
+        "confidence": confidence,
     }
     return _bounded_hints(hints)

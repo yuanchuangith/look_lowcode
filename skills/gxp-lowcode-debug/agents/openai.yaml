@@ -1,4 +1,4 @@
 interface:
   display_name: "GXP 低代码精确排查"
-  short_description: "只读定位动作、控制流、可信表关系、字段、C# 与历史异常"
-  default_prompt: "使用 $gxp-lowcode-debug 先锁定当前现象、期望规则和无匹配行为；页面资源先用 CPM 快照，表和字段先用本地 Schema 快照。推断关系必须具有全量数据验证且未被远程策略否决；过期、歧义或冲突时实时查开发库，不依赖关系快照。再由 Look 当前发布证据复核，并做紧凑只读检查。输出修改方案但不得调用或转入 gxp-lowcode-edit。"
+  short_description: "只读定位动作、控制流、源码业务链、可信表关系与历史异常"
+  default_prompt: "使用 $gxp-lowcode-debug 先锁定当前现象、期望规则和无匹配行为；页面资源先用 CPM 快照，表和字段先用本地 Schema 快照。低代码证据不足且已有组件、API、Service 或后端栈锚点时，再使用本地源码业务链工具并做紧凑只读检查。推断关系必须具有全量数据验证且未被远程策略否决。输出修改方案但不得调用或转入 gxp-lowcode-edit。"

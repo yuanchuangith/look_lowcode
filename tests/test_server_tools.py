@@ -6,6 +6,7 @@ import unittest
 from server import (
     LOCAL_CPM_TOOLS,
     LOCAL_SCHEMA_TOOLS,
+    LOCAL_SOURCE_TOOLS,
     MCP_TOOLS,
     create_mcp,
     inspect_action,
@@ -26,14 +27,15 @@ class ServerToolRegistrationTests(unittest.TestCase):
         self.assertFalse(signature.parameters["include_generated_csharp"].default)
         self.assertEqual(20, signature.parameters["max_nodes"].default)
 
-    def test_local_stdio_has_28_tools_and_http_factory_has_16(self) -> None:
+    def test_local_stdio_has_35_tools_and_http_factory_has_16(self) -> None:
         self.assertEqual(16, len(MCP_TOOLS))
         self.assertEqual(5, len(LOCAL_CPM_TOOLS))
         self.assertEqual(7, len(LOCAL_SCHEMA_TOOLS))
-        self.assertEqual(28, len(create_mcp()._tool_manager._tools))
+        self.assertEqual(7, len(LOCAL_SOURCE_TOOLS))
+        self.assertEqual(35, len(create_mcp()._tool_manager._tools))
         self.assertEqual(
             16,
-            len(create_mcp(include_local_cpm=False, include_local_schema=False)._tool_manager._tools),
+            len(create_mcp(include_local_cpm=False, include_local_schema=False, include_local_source=False)._tool_manager._tools),
         )
 
     def test_control_flow_defaults_match_public_contract(self) -> None:

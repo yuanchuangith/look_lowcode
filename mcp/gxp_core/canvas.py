@@ -221,7 +221,8 @@ def evaluate_condition_ast(
     left_ok, left, left_source = _resolve_operand(ast.get("left") or {}, inputs)
     right_ok, right, right_source = _resolve_operand(ast.get("right") or {}, inputs)
     operator = str(ast.get("operator", ""))
-    op = re.sub(r"[^a-z]", "", operator.lower())
+    aliases = {"=": "equal", "==": "equal", "!=": "notequal", "<>": "notequal"}
+    op = aliases.get(operator.strip(), re.sub(r"[^a-z]", "", operator.lower()))
     unary_null = op in {"equalnull", "isnull", "notequalnull", "isnotnull"}
     matched: bool | None = None
     if left_ok and (right_ok or unary_null):

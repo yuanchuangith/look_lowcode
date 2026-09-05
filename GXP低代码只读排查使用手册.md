@@ -97,13 +97,15 @@ include_generated_csharp=false
 
 四个诊断接口会返回紧凑 `source_hints`。只有低代码证据不足且其中出现明确层级和关键词时才读源码：
 
-- 组件 type/key/model key → 前端 `G:\hoyi\updateComponents\gxp2.components`。
-- API、Controller、Service、方法或真实后端栈 → 后端 `G:\hoyi\updateWeb\gxp2.web`。
+- 组件 type/key/model key → `inspect_component_source`。
+- API Route 或跨端请求字段 → `trace_api_contract`。
+- Controller、Service、方法或真实后端栈 → `trace_backend_call_chain`。
+- 数据集影响面 → `inspect_dataset_usage`；DataFilter 前后端契约 → `trace_component_filter_contract`。
 - 同时命中请求构造与接收字段 → 先前端、再后端。
 - 只有字段、表名、`CallAction` 或动态类名 → 不扫源码，继续低代码链路。
 - 没有源码锚点但缺真实交互 → 升级浏览器运行取证。
 
-受限脚本 `skills/gxp-lowcode-debug/scripts/search_source_evidence.py` 只使用 `rg` 搜索固定仓库，不构建、不修改、不自动扩大目录。最多返回 20 个文件、前 5 个上下文，JSON 不超过 32 KB。
+默认保留 F/G 两套只读仓库路径；`source_repository_status` 返回实际选择的 path、branch、commit 和 dirty 数量。索引仅保存结构元数据。受限脚本 `search_source_evidence.py` 只作为结构化工具未覆盖时的窄检索，不构建、不修改、不自动扩大目录。
 
 ## 4. 标准排查流程
 
@@ -120,7 +122,7 @@ include_generated_csharp=false
 
 ## 5. MCP 工具
 
-本地 Windows stdio 共 28 个工具；公网 HTTP MCP 有下表前 16 个 Look 工具。HTTP MCP 不注册 CPM 或 Schema 工具。
+本地 Windows stdio 共 35 个工具；公网 HTTP MCP 有下表前 16 个 Look 工具。HTTP MCP 不注册 CPM、Schema 或源码工具。
 
 | 分类 | 工具 | 用途 |
 | --- | --- | --- |
@@ -152,6 +154,13 @@ include_generated_csharp=false
 | 关系解析（仅本地） | `resolve_table_relation` | 按策略、快照新鲜度和实时数据库验证解析关系。 |
 | 关系否决（仅本地） | `reject_table_relation` | 用户明确确认错误后向远程提交 opaque relation ID。 |
 | 关系恢复（仅本地） | `restore_table_relation` | 恢复永久否决，随后重新进行数据验证。 |
+| 源码仓库状态（仅本地） | `source_repository_status` | 查看 F/G/自定义候选、Git 身份和索引新鲜度。 |
+| 源码索引刷新（仅本地） | `refresh_source_index` | 原子刷新本地结构索引，不写源码仓库。 |
+| 组件源码（仅本地） | `inspect_component_source` | 返回组件 designer/runtime/API、注册、模型与过滤锚点。 |
+| API 契约（仅本地） | `trace_api_contract` | 串联前端调用、ASP.NET Route、DTO 和 Service。 |
+| 后端调用链（仅本地） | `trace_backend_call_chain` | 从符号或真实栈追踪调用、实现、数据访问和异常流。 |
+| 数据集影响面（仅本地） | `inspect_dataset_usage` | 区分定义、发布引用、工作台引用和草稿引用。 |
+| 组件过滤契约（仅本地） | `trace_component_filter_contract` | 核对 DataFilter 历史命名反转与后端 DTO 字段。 |
 
 ### CPM 配置和刷新
 

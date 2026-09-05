@@ -132,6 +132,14 @@ class RelationPolicyStore:
         if not all(isinstance(value[key], expected) for key, expected in expected_types.items()):
             raise RuntimeError("relation policy JSON has invalid collection types")
         value.setdefault("next_audit_id", len(value["audit"]) + 1)
+        migrated = False
+        for scope_id, decisions in value["decisions"].items():
+            for decision in decisions.values():
+                if "last_restore_revision" not in decision:
+                    decision["last_restore_revision"] = int(value["scopes"].get(scope_id, {}).get("revision", 0)) if decision.get("state") == "restored" else 0
+                    migrated = True
+        if migrated:
+            self._write_unlocked(value)
         return value
 
     def _write_unlocked(self, value: dict[str, Any]) -> None:
@@ -211,7 +219,13 @@ class RelationPolicyStore:
             for relation_id, item in sorted(decisions.items())
             if item.get("state") == "rejected"
         ]
-        return {"scope_id": scope_id, "revision": int(scope["revision"]), "rejections": rejections}
+        restores = {
+            relation: int(item.get("last_restore_revision", scope["revision"] if item.get("state") == "restored" else 0))
+            for relation, item in decisions.items()
+            if item.get("last_restore_revision") or item.get("state") == "restored"
+        }
+        return {"scope_id": scope_id, "revision": int(scope["revision"]), "rejections": rejections,
+                "protocol_version": 2, "restore_revisions": restores}
 
     def reject(self, scope_id: str, relation_id: str, reason_code: str) -> dict[str, Any]:
         scope_id = _identifier(scope_id, "scope_id")
@@ -231,6 +245,7 @@ class RelationPolicyStore:
             decisions[relation_id] = {
                 "relation_id": relation_id,
                 "state": "rejected",
+                "last_restore_revision": int((current or {}).get("last_restore_revision", scope["revision"] if current and current.get("state") == "restored" else 0)),
                 "reason_code": reason_code,
                 "client_id": client_id,
                 "created_at": current.get("created_at", now) if current else now,
@@ -266,6 +281,7 @@ class RelationPolicyStore:
             decisions[relation_id] = {
                 "relation_id": relation_id,
                 "state": "restored",
+                "last_restore_revision": int(scope["revision"]) + 1 if changed else int((current or {}).get("last_restore_revision", scope["revision"] if current else 0)),
                 "reason_code": "admin_restore",
                 "client_id": client_id,
                 "created_at": current.get("created_at", now) if current else now,
@@ -296,7 +312,7 @@ def add_relation_policy_routes(app, store: RelationPolicyStore | None = None) ->
         try:
             scope_id = request.path_params["scope_id"]
             payload = policy_store.snapshot(scope_id)
-            etag = f'"{payload["revision"]}"'
+            etag = f'"policy-v2-{payload["revision"]}"'
             if request.headers.get("if-none-match") == etag:
                 return Response(status_code=304, headers={"ETag": etag})
             return JSONResponse(payload, headers={"ETag": etag})

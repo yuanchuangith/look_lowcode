@@ -7,7 +7,7 @@
 - 不读取、输出、记录或通过命令参数传递平台密码和数据库密码。
 - 密码只通过隐藏输入保存到操作系统凭据存储：Windows Credential Manager、macOS Keychain 或 Linux Secret Service。
 - Linux 没有可用的安全 keyring 后端时停止配置并提示安装系统 keyring，不得回退到明文文件。
-- CPM 与开发库 Schema 能力仅注册到本地 stdio；HTTP MCP 注册 16 个 Look 工具，本地 stdio 另含 5 个 CPM 工具和 7 个 Schema/可信关系工具，共 28 个。
+- CPM、开发库 Schema 和源码业务链能力仅注册到本地 stdio；HTTP MCP 注册 16 个 Look 工具，本地 stdio 另含 5 个 CPM、7 个 Schema/可信关系和 7 个源码工具，共 35 个。
 
 ## 前置检查
 
@@ -68,6 +68,25 @@ Schema 快照需要本机数据库连接。远程否定策略使用内置 HTTPS 
 ```
 
 macOS/Linux 使用 `sh scripts/configure_schema.sh`。首次调用 Schema 工具时生成本地快照，此后按 86400 秒 TTL 刷新。
+
+源码工具默认同时检查以下两套路径，不要求安装时存在：
+
+```text
+frontend: F:\cpm\gxp2.components, G:\hoyi\updateComponents\gxp2.components
+backend:  F:\cpm\gxp2.web,        G:\hoyi\updateWeb\gxp2.web
+```
+
+自定义路径或两个不同 commit 的副本需要显式选择 preferred：
+
+```powershell
+./scripts/configure_source_repositories.ps1 --frontend F:\cpm\gxp2.components --frontend G:\hoyi\updateComponents\gxp2.components --preferred-frontend F:\cpm\gxp2.components --backend F:\cpm\gxp2.web --backend G:\hoyi\updateWeb\gxp2.web --preferred-backend F:\cpm\gxp2.web
+```
+
+macOS/Linux 使用 `sh scripts/configure_source_repositories.sh` 和对应绝对路径。配置只写系统配置目录；索引只写系统数据目录，不写源码仓库。
+
+## 可信关系与源码索引升级
+
+先升级兼容协议 v2 的策略服务，再运行本仓库安装器更新插件。策略使用逐关系恢复版本及版本化 ETag；旧客户端缓存不含协议元数据时，新客户端会获取完整快照。源码索引 v3 按 layer 懒重建，旧关系缺少验证版本时按需重验，不触发无关 CPM 拉取或全库压力测试。回退时保留最新策略与审计文件。
 
 ## 验收
 
