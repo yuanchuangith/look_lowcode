@@ -40,6 +40,17 @@ def parse_args() -> argparse.Namespace:
         help=argparse.SUPPRESS,
     )
     parser.add_argument("--max-nodes", type=int, default=20)
+    parser.add_argument("--max-output-bytes", type=int, default=32768)
+    parser.add_argument("--design-id")
+    parser.add_argument("--at-time")
+    parser.add_argument("--value-path")
+    parser.add_argument("--value-offset", type=int, default=0)
+    parser.add_argument("--value-limit", type=int, default=2048)
+    parser.add_argument("--control-flow", action="store_true")
+    parser.add_argument("--follow-calls", action="store_true")
+    parser.add_argument("--max-call-depth", type=int, default=2)
+    parser.add_argument("--max-actions", type=int, default=8)
+    parser.add_argument("--max-edges", type=int, default=240)
     return parser.parse_args()
 
 
@@ -47,6 +58,10 @@ def main() -> int:
     args = parse_args()
     identifier = args.action_code or args.ref_id
     service = GxpReadonlyService()
+    if args.control_flow or args.follow_calls:
+        result = service.inspect_control_flow(identifier, version=args.version, group=args.group, node_key=args.node_key, start=args.start, end=args.end, design_id=args.design_id, at_time=args.at_time, follow_calls=args.follow_calls, max_call_depth=args.max_call_depth, max_actions=args.max_actions, max_nodes=args.max_nodes, max_edges=args.max_edges, max_output_bytes=args.max_output_bytes)
+        print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
+        return 0
     result = service.inspect_action(
         identifier,
         version=args.version,
@@ -66,6 +81,12 @@ def main() -> int:
             and not args.no_generated_csharp
         ),
         max_nodes=args.max_nodes,
+        max_output_bytes=args.max_output_bytes,
+        design_id=args.design_id,
+        at_time=args.at_time,
+        value_path=args.value_path,
+        value_offset=args.value_offset,
+        value_limit=args.value_limit,
     )
     if args.compare_versions:
         result["published_vs_draft"] = service.compare_designs(

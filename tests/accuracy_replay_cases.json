@@ -1,0 +1,14 @@
+[
+  {"id":"field-correction","turns":["member_id 没使用","我表达错误，member_id 要使用","nodeData.id 就是 member_id。按这个继续检查。"],"evidence":"当前配置 nodeData.id 写到成员字段；没有失败样本。","expected":{"classification":"passed","decision":"keep_member_id"}},
+  {"id":"exclude-hours","turns":["学时映射缺少","class_hour 本项目不采用。其他不用扩展，确认这条就行。"],"evidence":"只有学时映射缺少；本轮用户已明确不使用学时。","expected":{"classification":"excluded","decision":"exclude_hours"}},
+  {"id":"exclude-periodic","turns":["看看周期排序","周期排序忽略，先把这一条从本次清单移除。"],"evidence":"周期排序不在当前验收范围。","expected":{"classification":"excluded","decision":"exclude_periodic"}},
+  {"id":"existing-sort","turns":["岗位排序是不是要新增变量","已经有全局排序变量，复核即可。"],"evidence":"当前发布：循环写入 serial_number=global sort，然后递增一次；分支完整。","expected":{"classification":"passed","decision":"keep_existing_sort"}},
+  {"id":"two-dedup-rules","turns":["技能历史命中过不培训","初始培训时关联文件已在公司、部门或岗位级安排，就不要重复带出。怎么结合？"],"evidence":"主技能历史去重与本次三级文件重复是不同维度。文件可以在主技能完成后仍需培训。","expected":{"classification":"implementation","decision":"separate_dedup_rules"}},
+  {"id":"scope-counterexample","turns":["是不是少了岗位限制会串流程","非风险不是已有 flow_id，风险不是已有 position_training_id 吗？"],"evidence":"两条实际查询分别已有上述等值范围。没有同范围内冲突记录或可触发路径。","expected":{"classification":"passed","decision":"withdraw_unproven_scope_bug"}},
+  {"id":"chosen-csv","turns":["不采用全局数组","我选择查 file_ver_id 拼逗号字符串，传给子动作分割后判断。给出实现。"],"evidence":"当前仅后端父子动作传参；版本ID不含逗号；同人同流程三级记录可先取全。","expected":{"classification":"implementation","decision":"use_csv_parameter"}},
+  {"id":"shared-type","turns":["全局变量前后端共用","读取值类型还没查到，你确认可以直接强转 List 吗？"],"evidence":"可能经历JSON转换，没有实际 .NET 对象类型证据。","expected":{"classification":"risk","decision":"verify_type_before_cast"}},
+  {"id":"normal-numbered-item","turns":["上一条回答：问题1：主体正确。第1部分列已通过；第2部分查询范围建议收紧；第3部分可补空值防护。","问题1有什么问题吗？2和3我解决了。"],"evidence":"第1部分实际是已通过项目，不是缺陷；第2、3项修改后尚未读取。","expected":{"classification":"passed","decision":"clarify_item_one_passed"}},
+  {"id":"reported-fixed","turns":["BUG-01 已确认漏掉一个调用入口的参数","改了，已经解决。你复核一下。"],"evidence":"现有证据只有旧发布；尚未读取用户最新修改。","expected":{"classification":"pending_review","decision":"reload_before_closing"}},
+  {"id":"conversion-not-null-bug","turns":["这里 Trim 会空指针吗","请按生成代码判断，不要只看表达式。"],"evidence":"C#：var file_ver_id = Convert.ToString(skill[\"file_ver_id\"]); 集合过滤空项后判断 Contains(file_ver_id.Trim())；字典键存在，其值仅为数据库NULL或字符串。","expected":{"classification":"passed","decision":"do_not_invent_null_bug"}},
+  {"id":"new-version-real-callee","turns":["之前给的位置在 similar-A","我改了并发布，重新定位实际调用，不要继续用旧行号。"],"evidence":"新设计D2：main第17行 CallAction，actionName.value=actual-B，label=新增技能资料。另一个相似名称的similar-A没有被调用；actual-B第8行是目标。","expected":{"classification":"implementation","decision":"follow_actual_B_current_design"}}
+]

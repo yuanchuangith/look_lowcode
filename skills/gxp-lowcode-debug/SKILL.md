@@ -5,13 +5,14 @@ description: Use this skill when the user asks to 排查或复核 GXP 低代码�
 
 # GXP Low-Code Debug
 
-通过 `gxp-lowcode-readonly` MCP 从真实 ActionDesign 和只读业务证据定位问题。不要询问、读取、输出或转述数据库连接信息。
+通过 `gxp-lowcode-readonly` MCP 从真实 ActionDesign、只读业务证据和本地 metadata-only 源码索引定位问题。不要询问、读取、输出或转述数据库连接信息。
 
 ## CPM 快照路由
 
 页面全貌、菜单入口、组件绑定、模型影响面、审批流程和接口问题，先用本地 CPM 快照形成候选范围；动作 code/RefId、草稿/发布、历史发布、画布分组节点、生成 C# 和业务记录仍以 Look 当前只读数据库工具为权威。涉及这些跨层定位时，先完整读取 `references/cpm-snapshot-routing.md`。
 
 - CPM 工具只读本地快照；刷新只更新本地文件，不修改平台设计、发布状态或业务数据。
+- CPM 与源码索引刷新相互独立；调用源码工具不会自动刷新 CPM 或 Schema，也不会执行开发库全量关系验证。
 - 页面级问题优先 `inspect_page_snapshot`，全局检索优先 `search_platform_snapshot`；工具会在快照超过 30 分钟时等待安全刷新。
 - 组件或编排元件参数知识按需调用 `get_cpm_knowledge`，一次只读一个白名单主题，不一次加载全部 `cpm-platform` 参考资料。
 - 输出增加 `CPM快照` 证据层。它用于候选定位，不能覆盖 Look 对当前发布副本、画布节点和业务记录的确认。
@@ -24,7 +25,7 @@ description: Use this skill when the user asks to 排查或复核 GXP 低代码�
 - `search_database_schema` 按表名、字段名和备注定位，`inspect_table_schema` 返回表结构、数据库声明外键和当前可信关系。
 - 推断关系只有在目标列唯一、类型兼容、至少 20 个不同非空来源键且全量数据 100% 匹配后，才标记为 `data_verified`；自动选择还要求同组候选验证完整、没有截断或未决项且只有一个通过。`verification_scope=explicit_target` 仅证明指定目标匹配，不证明全局唯一。
 - 每次使用推断关系前必须同步远程否决策略；命中 `rejected` 后立即停止，不重新验证或重建，直到显式恢复。
-- 快照过期、Schema 指纹变化、关系歧义、验证失败或当前故障证据与关系冲突时，调用 `resolve_table_relation(..., force_live=true)`；以 `live_database` 结果回答本次问题，不把实时结果描述为快照关系。
+- 快照过期、Schema 指纹变化、关系歧义、验证失败或当前故障证据与关系冲突时，调用 `resolve_table_relation(..., force_live=true)`；以 `live_database` 结果回答本次问题，不把实时结果描述为快照关系。指定目标只证明该目标的匹配事实，不证明候选唯一。
 - 策略服务不可用时只展示 `declared_fk` 物理约束，推断关系标记 `尚未确认`。实时验证仍不确定时不得选择一个候选目标。
 - 只有用户明确指出某个关系错误，并且当前回答中已有该关系的 `relation_id` 时，才调用 `reject_table_relation`。普通质疑、待确认或查询失败不写永久否决。
 - `reject_table_relation` 只向免鉴权远端提交 opaque relation ID 和标准原因码；表名、字段名、Schema 与数据值留在本地。`restore_table_relation` 恢复后必须重新完成数据验证；协议 v2 按恢复版本让所有机器上的旧验证失效，同组竞争候选恢复也会使旧唯一性失效。
@@ -34,12 +35,14 @@ description: Use this skill when the user asks to 排查或复核 GXP 低代码�
 
 ## 业务规则极性门禁与会话锚点
 
+多轮纠正、排除项、实现选择或“改了再看看”时，按需读取 `references/conversation-contract.md`。维护当前会话的目标、锚点、规则、排除项、已选方案和稳定问题编号；服务端不持久化。向 `diagnose_codex_input` 传可选 `context` 衔接追问。用户本轮纠正优先，已排除事项不重复报告，用户已选方案没有明确缺陷时不反复替换。
+
 开始工具检查前，先用三行锁定规则；三项没有确认完整时，只报告当前配置，不判定正确或错误：
 
 ```text
-当前现象：用户实际看到什么
-期望规则：哪些值允许被选择
-无匹配时行为：为空且不可选择 / 允许全部 / 尚未确认
+当前现象：用户实际看到什么或本轮希望复核什么
+期望规则：当前目标、范围、允许选择/生成/去重行为
+无匹配时行为：留空 / 正常带出 / 跳过 / 报错 / 尚未确认
 ```
 
 - “现在可以选择全部”可能是故障现象，也可能是期望，不能自行判断极性。用户纠正后立即更新上述三行，只重算结论。
@@ -52,6 +55,7 @@ description: Use this skill when the user asks to 排查或复核 GXP 低代码�
 - 第一阶段只定位页面、动作、分组、节点和 `facts`：`inspect_action` 保持 `include_params=false`、`include_generated_csharp=false`。
 - 第二阶段必须已经指定分组、节点 Key 或窄画布范围，才允许 `include_params=true`；超过 10 个节点时先继续缩小，不请求大块 `paramsValue`。
 - 仅当异常栈给出精确 C# 行，或节点事实仍不足以解释问题时，才显式传 `include_generated_csharp=true`。`terms` 不是读取生成 C# 的授权。
+- 工具默认32 KiB预算。响应的 `response_complete=false`、`evidence_complete=false` 或省略清单出现时按 `next_read` 续读，补齐前只报告候选；续读保留 design_id。生成代码优先 `generated_csharp_scope=group_method`，未解析范围时不要把全动作词命中当精确节点。
 - 下拉、过滤、值被覆盖问题必须改用 `inspect_component_filters` 汇总同一组件的全部 `DataFilter` 写入点；不能凭单个初始化节点下结论。
 
 ## 嵌套控制流证据门禁
@@ -96,7 +100,7 @@ description: Use this skill when the user asks to 排查或复核 GXP 低代码�
 
 ## 命中驱动源码升级门禁
 
-始终先完成低代码 MCP 定位，再检查响应中的 `source_hints`。MCP 只返回逻辑锚点，不读取本地源码。
+先完成低代码 MCP 定位，再检查响应中的 `source_hints`。源码工具分为两层：低代码 MCP 返回逻辑锚点；命中源码升级门禁后，优先调用本地结构化源码 MCP（读取本机配置的源码仓库元数据和 metadata-only 索引），必要时才使用兼容搜索脚本。源码工具不上传源码正文、Schema 或业务数据。
 
 - 画布参数、过滤条件或分支已经直接违反已确认业务规则：结论停在低代码证据，不查源码。
 - 低代码配置正确但运行表现不同，并命中组件 type/key、事件或 model key：只读前端仓库。
@@ -106,7 +110,7 @@ description: Use this skill when the user asks to 排查或复核 GXP 低代码�
 - 仅缺少真实交互状态且没有精确源码锚点：按运行页面证据流程升级浏览器，不扫描仓库。
 - 纯 UI 样式、渲染或组件交互实现问题转交 `gxp-component-debug`。
 
-门禁成立时完整读取 `references/source-code-evidence.md`。优先按锚点调用本地结构化源码工具；只有结构化工具尚未覆盖且 `source_hints` 含精确词时，才使用兼容搜索脚本。找不到结果时不得扩大到其他目录。源码只读，不默认构建、格式化或修改。
+门禁成立时完整读取 `references/source-code-evidence.md`。优先按锚点调用本地结构化源码工具；只有结构化工具尚未覆盖且 `source_hints` 含精确词时，才使用兼容搜索脚本。找不到结果时不得扩大到其他目录。源码仓库只读，索引写入系统数据目录；不默认构建、格式化或修改源码。
 
 输出时分层标记证据：`低代码`、`前端源码`、`后端源码`、`业务数据`、`页面运行`、`尚未验证`。静态源码命中不能写成运行验收通过。源码层返回 `partial/unresolved`、仓库歧义或 stale 时保留原因；有效层证据可单独引用，但不得补成跨层确定结论。
 
@@ -122,20 +126,23 @@ description: Use this skill when the user asks to 排查或复核 GXP 低代码�
 4. 用 `get_design_versions` 读取当前草稿与当前发布。默认不加载历史；只有排查历史异常时使用 `include_history=true`。
 5. 用 `inspect_action` 定位节点：
    - 传已知分组、节点 Key、业务关键词。
-   - 已知字段时传 `focus_fields`，优先读取 `field_evidence`。
+   - 已知字段时传 `focus_fields`，优先读取 `field_evidence`，区分定义、读取、条件、循环和传参；零命中不证明未使用。分组歧义时先选择明确 key。
    - 第一阶段只读定位和 `facts`，不要读取参数或生成 C#。
    - 第二阶段已缩小到分组、节点或不超过 10 个节点的范围后，才传 `include_params=true`，以完整 `paramsValue` 为准。
    - 下拉或过滤问题完整读取 `references/component-filter-audit.md`，再用 `inspect_component_filters` 审计全部写入阶段。
 6. 两层嵌套或涉及分支/结束节点归属时，用 `inspect_control_flow` 读取完整闭合块、可见树和最小场景矩阵；结构无效时停止 Bug 判断。
 7. 用户描述了点击、选择、留空、批量编辑等具体交互时，先执行“交互分支命中门禁”，再给修改方案。
 8. 沿 `CallPublicAction`、`CallAction` 继续追踪，直到数据库读写、显式返回或首个异常点。
+   - 已有明确入口且需要字段传递链时，使用 `inspect_control_flow(follow_calls=true)`；默认深度2、最多8个动作。检查 `call_flow.unresolved` 和调用绑定，保留每个分支与版本边界；静态边不代表运行路径或数据验证外键。
+   - 元件或变量知识不确定时，先 `get_cpm_knowledge(kind="catalog", name="main", query="变量")`，再读取返回的合法主题。前端示例不直接当后端C#表达式使用。
 9. 业务表先 `describe_table`，再 `get_records` 使用索引等值条件、小列集和小 `limit`。
 10. 用 `references/report-contract.md` 输出结论；不要省略定位字段或写“同上”。
 11. 只有命中“源码升级门禁”时，才按组件、API、后端栈或数据集锚点调用对应本地源码工具；否则明确写“低代码证据已足够，无需查源码”。
 
 ## 问题输出格式门禁
 
-- 诊断类回答第一行直接写 `问题1：<一句话结论>`，不要先堆版本元数据或排查过程。
+- 先给复核结论，再分为已确认缺陷、条件性风险、可选加固、已通过、待复核；无确定缺陷不强行使用“问题1”。缺陷用稳定 `BUG-01`，风险用 `RISK-01`，建议用 `SUG-01`，已通过项不占缺陷编号。
+- “用户说已解决”是待复核；读取新设计后才是静态已修复；运行验证独立记录。用户引用旧序号时对应上一条具体项目，不把章节编号当缺陷编号。
 - 同一问题涉及多个动作、分组或节点时，依次写 `位置1`、`位置2`；每个位置都完整给出，不写“同上”。
 - 每个位置默认使用以下紧凑顺序：`动作：code／显示名称`、`RefId`、`分组：显示名称／group_key`、`画布行／索引`、`节点：node_key／显示名称`、`类型`、`当前`、`生成 C#`。
 - 位置之后按证据补充 `下游约束`、`只读数据`、`失败机制`、`修改`、`生命周期/保留项`、`验证状态`；没有对应证据的段落省略，不用空模板占位。

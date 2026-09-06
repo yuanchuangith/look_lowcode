@@ -26,6 +26,7 @@ def main() -> int:
     source.add_argument("--json", help="UTF-8 JSON file path, or - for JSON stdin")
     parser.add_argument("--at-time", help="Optional exception time, ISO-like format")
     args = parser.parse_args()
+    context = None
     if args.text:
         text = read_source(args.text)
         at_time = args.at_time
@@ -35,7 +36,8 @@ def main() -> int:
             raise SystemExit("JSON input must be an object containing string field 'text'")
         text = payload["text"]
         at_time = args.at_time or payload.get("at_time")
-    result = GxpReadonlyService().diagnose_codex_input(text, at_time=at_time)
+        context = payload.get("context")
+    result = GxpReadonlyService().diagnose_codex_input(text, at_time=at_time, context=context)
     print(json.dumps(result, ensure_ascii=False, indent=2, default=str))
     return 0
 

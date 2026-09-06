@@ -1,5 +1,20 @@
 # Findings
 
+## Accuracy implementation accepted 2026-09-06
+- Final results: docs/accuracy-implementation-results-2026-09-06.md. Implemented session-only intent contract, precise references/groups/calls, bounded field flow, method-local C# evidence, UTF-8 paging and allow-listed knowledge catalog; verified through195 regression cases (three live skips),12 same-model fixed-evidence cases and fresh installed MCP sessions.
+- The paired replay primarily measures reporting improvement: both versions make12 correct business decisions, but the baseline mislabels seven normal results as problem1. No generalized intent-accuracy percentage is claimed. New static analysis adds small-result CPU cost; oversized results are explicitly reduced within budget.
+- Local version0.3.1+codex.local-20260906-021126 installed through the repository installer; durable source baseline and raw evidence are external to the repository, preserving earlier dirty work and enabling installer-only rollback.
+
+## Conversation accuracy review 2026-09-06
+- Probe results: condition/reference field focus 0 versus text 1; local-call targets lose group values; exact group matches a suffix copy; C# target line 26 is excluded by first-ten generic matches; one-node response is 102186 bytes with no count truncation.
+- Context-free follow-up returns not_found; this demonstrates a missing explicit-context API, not an independent measure of model comprehension.
+- Existing focused regressions: 39 passed. Full review and acceptance matrix are in docs/conversation-accuracy-review-2026-09-06.md. Runtime code, Skill and installed plugin were left unchanged by this assessment.
+- Preserve pre-existing edits in .gitignore, AI-SETUP.md, Skill, source-code-evidence.md and install_claude.py.
+- report-contract.md mandates problem1 even for successful reviews; this conversation demonstrates the resulting numbered-item ambiguity.
+- diagnostics.py accepts text/time but no structured context. Skill anchors exist, but exclusions, corrections and finding states lack a schema.
+- Field lookup omits condition and variable-value reads. Local-call facts omit actionName.value; graph targets fall back to display names.
+- Node-count limits do not bound serialized bytes. C# candidates search the entire action, not the selected group method.
+
 ## Follow-up audit observations 2026-09-05
 - Real backend route diff is now explained: the removed AuthController.TestConnection1 GET was commented out; four other route identities were corrected by combining method-level Route attributes (Lock Refresh/Check/Unlock and Apps ChangeStatus). The 593→592 count is positive, not a lost active endpoint in this comparison.
 - Real ConfigExport insertConfigExport appends a conditional validate query with += but the request index reports dynamic=false/structural. The endpoint path is stable in that example; query uncertainty is lost. The synthetic suffix probe also permits path changes.

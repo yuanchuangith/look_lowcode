@@ -8,6 +8,10 @@ from .db import ReadOnlyDatabase
 from .diagnostics import DiagnosticEngine
 from .repository import GxpRepository
 from .source_hints import build_source_hints
+from .canvas_references import select_groups
+from .canvas_budget import canvas_payload, node_value_page, response_limit
+from .canvas_evidence import scoped_csharp
+from .call_flow import expand_calls
 
 
 class GxpReadonlyService:
@@ -245,12 +249,17 @@ class GxpReadonlyService:
         focus_fields: list[str] | None = None,
         include_generated_csharp: bool = False,
         max_nodes: int = 20,
+        max_output_bytes: int = 32768,
+        value_path: str | None = None,
+        value_offset: int = 0,
+        value_limit: int = 2048,
     ) -> dict[str, Any]:
+        response_limit(max_output_bytes)
         matches = self.repository.resolve_action(identifier)
         if not matches:
             matches = self.repository.search_actions(identifier)
         if len(matches) != 1:
-            return {
+            return canvas_payload({
                 "identifier": identifier,
                 "resolution_status": "not_found" if not matches else "ambiguous",
                 "matches": matches,
@@ -258,7 +267,7 @@ class GxpReadonlyService:
                 "next_step": (
                     "Call search_actions and select one exact action code or RefId before inspection."
                 ),
-            }
+            }, max_output_bytes, identifier=identifier, tool="inspect_action")
         ref_id = str(matches[0]["ref_id"])
         design = self.repository.load_design(
             ref_id,
@@ -267,6 +276,20 @@ class GxpReadonlyService:
             at_time=at_time,
             include_deleted=bool(design_id or at_time),
         )
+        if value_path is not None:
+            if not node_key or not group or value_offset and not design_id:
+                raise ValueError("value paging requires exact group/node; continuation requires design_id")
+            selected = self.inspector.inspect(design["data_json"], group=group, node_key=node_key, include_params=True)
+            if len(selected) != 1:
+                raise ValueError("value paging requires one unambiguous node")
+            page = node_value_page(selected[0], value_path, value_offset, value_limit)
+            return canvas_payload({
+                "action": design.get("metadata"),
+                "design": {key: design.get(key) for key in ("design_id", "version", "data_sha256", "csharp_sha256")},
+                "group_key": selected[0]["group_key"], "node_key": node_key,
+                "value_page": page, "runtime_verified": False,
+                "next_read": {"identifier": identifier, "group": selected[0]["group_key"], "node_key": node_key, "design_id": design["design_id"], "version": design["version"], "value_path": value_path, "value_offset": page["next_offset"], "value_limit": value_limit} if not page["complete"] else None,
+            }, max_output_bytes, identifier=identifier, tool="inspect_action")
         nodes = self.inspector.inspect(
             design["data_json"],
             group=group,
@@ -279,6 +302,11 @@ class GxpReadonlyService:
         published = design.get("version") == "published"
         current_runtime_copy = published and not bool(design.get("is_deleted"))
         field_evidence = self.inspector.focus_fields(nodes, focus_fields or [])
+        data_json = design["data_json"]
+        if isinstance(data_json, str):
+            import json
+            data_json = json.loads(data_json)
+        _, group_resolution = select_groups(data_json.get("actionData", []), group)
         reported_nodes = nodes
         if focus_fields and not terms and not node_key:
             focused_locations = {
@@ -370,6 +398,8 @@ class GxpReadonlyService:
             "max_nodes": safe_max_nodes,
             "scanned_node_count": len(nodes),
             "too_broad_for_params": too_broad_for_params,
+            "group_resolution": group_resolution,
+            "reference_coverage": {"mode": "structural_and_bounded_lexical", "complex_expressions": "partial", "zero_matches_prove_unused": False},
         }
         if too_broad_for_params:
             result["params_omitted"] = True
@@ -391,13 +421,17 @@ class GxpReadonlyService:
             design=design,
             nodes=limited_nodes,
         )
+        csharp = str(design.get("csharp_code", ""))
+        if include_generated_csharp and limited_nodes:
+            csharp, csharp_scope = scoped_csharp(csharp, limited_nodes, str(design.get("design_id") or ""))
+            result["generated_csharp_scope"] = csharp_scope
         if csharp_line:
             result["generated_csharp"] = self.inspector.csharp_context(
                 str(design.get("csharp_code", "")), csharp_line, csharp_context
             )
         elif include_generated_csharp and terms:
             csharp_result = self.inspector.search_csharp_with_metadata(
-                str(design.get("csharp_code", "")),
+                csharp,
                 terms,
                 csharp_context,
                 max_matches=20,
@@ -415,7 +449,7 @@ class GxpReadonlyService:
             )
             result["generated_csharp_search_terms"] = generated_terms
             csharp_result = self.inspector.search_csharp_with_metadata(
-                str(design.get("csharp_code", "")),
+                csharp,
                 generated_terms,
                 csharp_context,
                 max_matches=20,
@@ -433,13 +467,18 @@ class GxpReadonlyService:
             result["node_generated_csharp_evidence"] = (
                 self.inspector.generated_csharp_node_evidence(
                     limited_nodes,
-                    str(design.get("csharp_code", "")),
+                    csharp,
                     focus_fields=focus_fields,
                     context=csharp_context,
                     max_nodes=min(10, safe_max_nodes),
                 )
             )
-        return result
+        if not focus_fields:
+            result["nodes"] = [
+                {**node, "facts": {key: value for key, value in node["facts"].items() if key != "references"} | {"reference_count": len(node["facts"].get("references", []))}}
+                for node in result["nodes"]
+            ]
+        return canvas_payload(result, max_output_bytes, identifier=identifier, tool="inspect_action")
 
     def inspect_control_flow(
         self,
@@ -459,18 +498,23 @@ class GxpReadonlyService:
         at_time: str | None = None,
         max_nodes: int = 120,
         max_edges: int = 240,
+        follow_calls: bool = False,
+        max_call_depth: int = 2,
+        max_actions: int = 8,
+        max_output_bytes: int = 32768,
     ) -> dict[str, Any]:
+        response_limit(max_output_bytes)
         matches = self.repository.resolve_action(identifier)
         if not matches:
             matches = self.repository.search_actions(identifier)
         if len(matches) != 1:
-            return {
+            return canvas_payload({
                 "identifier": identifier,
                 "resolution_status": "not_found" if not matches else "ambiguous",
                 "matches": matches,
                 "count": len(matches),
                 "next_step": "Select one exact action code or RefId before control-flow inspection.",
-            }
+            }, max_output_bytes, identifier=identifier, tool="inspect_control_flow")
         ref_id = str(matches[0]["ref_id"])
         design = self.repository.load_design(
             ref_id,
@@ -495,7 +539,9 @@ class GxpReadonlyService:
         )
         published = design.get("version") == "published"
         current_runtime_copy = published and not bool(design.get("is_deleted"))
-        return {
+        if follow_calls:
+            flow["call_flow"] = expand_calls(self.repository, self.inspector, design, group=group, node_key=node_key, version=version, at_time=at_time, max_depth=max_call_depth, max_actions=max_actions, max_nodes=max_nodes, max_edges=max_edges, start=start, end=end)
+        result = {
             "action": design.get("metadata"),
             "design": {
                 key: design.get(key)
@@ -521,6 +567,7 @@ class GxpReadonlyService:
             "version_semantics": self._version_semantics(),
             **flow,
         }
+        return canvas_payload(result, max_output_bytes, identifier=identifier, tool="inspect_control_flow")
 
     def inspect_component_filters(
         self,
@@ -649,9 +696,9 @@ class GxpReadonlyService:
         )
 
     def diagnose_codex_input(
-        self, text: str, *, at_time: str | None = None
+        self, text: str, *, at_time: str | None = None, context: dict[str, Any] | None = None
     ) -> dict[str, Any]:
-        return self.diagnostics.diagnose_codex_input(text, at_time=at_time)
+        return self.diagnostics.diagnose_codex_input(text, at_time=at_time, context=context)
 
     def describe_table(self, table: str) -> dict[str, Any]:
         return self.repository.describe_table(table)

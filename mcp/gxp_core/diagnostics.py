@@ -7,6 +7,7 @@ from typing import Any
 from .canvas import CanvasInspector, condition_ast, evaluate_condition_ast
 from .repository import GxpRepository
 from .source_hints import build_source_hints
+from .conversation import anchor_identifiers, conversation_context
 
 
 STACK_FRAME = re.compile(
@@ -554,10 +555,11 @@ class DiagnosticEngine:
         )
         return result
 
-    def diagnose_codex_input(self, text: str, *, at_time: str | None = None) -> dict[str, Any]:
+    def diagnose_codex_input(self, text: str, *, at_time: str | None = None, context: dict[str, Any] | None = None) -> dict[str, Any]:
         text = (text or "").strip()
         if not text:
             raise ValueError("Codex input cannot be empty")
+        context_state = conversation_context(context, text)
         parsed = parse_dynamic_exception(text)
         if parsed.get("matched"):
             diagnosis = self.trace_dynamic_exception(text, at_time=at_time)
@@ -603,6 +605,13 @@ class DiagnosticEngine:
                 name_matches.append(item)
                 seen_ref_ids.add(ref_id)
         actions.extend(name_matches)
+        reused_context = False
+        explicit_tokens = [token for token in tokens if re.fullmatch(r"(?:[A-Za-z0-9]{8}|[A-Fa-f0-9-]{32,36})", token) and (len(token) > 8 or any(char.isdigit() or char.isupper() for char in token))]
+        if not actions and not explicit_tokens and not name_queries and not PAGE_SEMANTICS.search(text):
+            for anchor in anchor_identifiers(context_state):
+                actions.extend(self.repository.resolve_action(anchor))
+            actions = list({str(action.get("ref_id")): action for action in actions}.values())
+            reused_context = bool(actions)
         page_queries = page_name_queries(text) if PAGE_SEMANTICS.search(text) else []
         page_candidates = []
         seen_pages: set[str] = set()
@@ -679,6 +688,12 @@ class DiagnosticEngine:
             action=actions[0] if len(actions) == 1 else None,
             text=text,
         )
+        if context_state is not None:
+            result["conversation_context"] = context_state
+            result["context_anchor_reused"] = reused_context
+            if len(actions) == 1 and context_state["refresh_required"]:
+                result["next_tools"] = ["compare_designs", "inspect_action"]
+                result["recheck_target"] = {"ref_id": actions[0].get("ref_id"), "use_current_design": True, "reuse_old_canvas_lines": False}
         return result
 
     def evaluate_node_predicate(

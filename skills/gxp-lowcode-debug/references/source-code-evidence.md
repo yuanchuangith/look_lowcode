@@ -7,7 +7,7 @@
 - 前端默认候选：`F:\cpm\gxp2.components`、`G:\hoyi\updateComponents\gxp2.components`
 - 后端默认候选：`F:\cpm\gxp2.web`、`G:\hoyi\updateWeb\gxp2.web`
 
-`source_repository_status` 只检查上述候选和 `source-repositories.json` 中显式配置的绝对路径，不向父目录、其他盘符或用户目录扩散。多个副本 commit、remote 或 dirty 内容不一致且没有 preferred 时返回 `REPOSITORY_AMBIGUOUS`。源码排查默认不联网、不构建、不修改、不格式化。
+`source_repository_status` 只检查上述候选和 `source-repositories.json` 中显式配置的绝对路径，不向父目录、其他盘符或用户目录扩散。多个副本 commit、remote 或相关 dirty 内容不一致且没有 preferred 时返回 `REPOSITORY_AMBIGUOUS`；无关文档和产物仍可显示在 Git 状态中，但不参与源码索引指纹。源码排查默认不联网、不构建、不修改、不格式化；结构化源码工具读取本地仓库并把 metadata-only 索引写入系统数据目录。
 
 自定义或双副本选择使用 `scripts/configure_source_repositories.ps1|sh`。配置只保存仓库路径和 preferred，不保存源码与凭据。
 
@@ -41,7 +41,7 @@
 - Controller、Service、方法或真实后端栈：用 `trace_backend_call_chain`。多实现、反射或同名方法返回候选，不静默选第一个。
 - 数据集影响面：用 `inspect_dataset_usage`。发布引用与草稿引用分开；草稿明确标记不影响运行。返回的表名只作为 Schema 工具锚点。
 - DataFilter 覆盖：先完成低代码 `inspect_component_filters`，再用 `trace_component_filter_contract`。必须展示历史反转 `dynamicWhere → conditionFilter（SQL 字符串）`、`staticWhere → dynamicFilter（JSON 条件）`。
-- `source_repository_status` 查看路径、branch、commit、dirty 数量和索引新鲜度；`refresh_source_index` 仅刷新本地元数据索引。
+- `source_repository_status` 查看路径、branch、commit、dirty 数量和索引新鲜度；`refresh_source_index` 仅刷新本地 metadata-only 索引。当前索引为 v3，按 layer 校验源码/配置依赖；结构化结果采用 64 KiB UTF-8 JSON 硬预算，裁剪时保留未决状态。
 
 每项源码证据都给出 layer、kind、仓库相对 path、行号、symbol 和 confidence。源码索引 v3 对 Git NUL 状态与相关源码/配置文件内容摘要做校验；按工具请求的 layer 刷新，构建期间变更或读取代次持续变化时返回 unresolved。stale、缺失或歧义层的旧索引不参与精确证据输出；健康层保留结果但不形成跨层闭合结论。
 

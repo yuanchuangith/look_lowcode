@@ -1,6 +1,21 @@
 # Task Plan: Local Schema Snapshot and Trusted Relations
 
 ## Goal
+Implementation 2026-09-06 (approved): implement both accuracy stages, run regression and paired conversation replay, then update only the local plugin. Baseline: F:/Users/25249/AppData/Local/Temp/look-accuracy-baseline-hdpn1l_t (373 files, including existing dirty/untracked source).
+
+### Accuracy implementation gates
+- [complete] Stage 1: report/context contracts, reference lookup and exact call/group identity; 51 focused tests passed.
+- [complete] Stage 2: bounded call flow, scoped C# evidence, output paging and knowledge catalog; 195 full tests, 192 passed/3 live skips.
+- [complete] Final paired same-model replay: candidate12/12; baseline12/12 decisions but seven normal-result heading failures. Synthetic performance and 35/16 fresh MCP fixture checks recorded.
+- [complete] Local installer and installed-launcher MCP verification: 0.3.1+codex.local-20260906-021126 enabled;60 source hashes match;35/16 registry and actual launcher knowledge calls pass. Durable baseline and evidence under F:/Desktop/git/look_lowcode-backups.
+
+Review session 2026-09-06: assess conversation-grounded improvements to intent tracking, action/field relationship discovery, and review reporting. Preserve existing uncommitted changes; do not deploy or change runtime behavior during this assessment.
+
+### Conversation review phases
+- [complete] Inspect Skill contracts, routing, canvas search and existing regression coverage.
+- [complete] Reproduce bounded local failure modes without database access; seven synthetic observations recorded and 39 focused tests passed.
+- [complete] Record prioritized proposals, acceptance cases and limits in docs/conversation-accuracy-review-2026-09-06.md; implementation and deployment remain outside this assessment.
+
 Implement the local Schema/trusted-relation system and the approved metadata-only source-evidence index, including accurate frontend/backend business-chain tools, portable installation, documentation, and regression coverage.
 
 ## Decisions

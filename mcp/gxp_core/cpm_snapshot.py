@@ -324,8 +324,28 @@ def _knowledge_path(root: Path, kind: str, name: str) -> Path:
     raise SnapshotError("KNOWLEDGE_NOT_ALLOWED", "kind 仅支持 skill、component、reference、element")
 
 
-def get_cpm_knowledge(kind: str, name: str, max_chars: int = 12000) -> dict[str, Any]:
-    """Read one allow-listed cpm-platform skill topic from the local snapshot."""
+def _knowledge_catalog(root: Path, query: str, limit: int) -> dict[str, Any]:
+    skill = _safe_child(root, "skills", "cpm-platform")
+    topics = [("skill", "main", skill / "SKILL.md")]
+    topics.extend(("reference", name, skill / "references" / f"{name}.md") for name in ("data-resources", "flows", "interfaces", "languages", "menus"))
+    topics.extend(("component", path.stem, path) for path in sorted((skill / "references" / "components").glob("*.md")))
+    topics.extend(("element", path.parent.name + "/" + path.stem, path) for path in sorted((skill / "references" / "elements").glob("*/*.md")))
+    variable_query = any(term in query.casefold() for term in ("变量", "数组", "赋值", "variable", "array"))
+    entries = []
+    for kind, name, candidate in topics:
+        if not candidate.is_file():
+            continue
+        path = _knowledge_path(root, kind, name)
+        match = not query or query.casefold() in name.casefold()
+        if variable_query and name in {"DataProcessing/SetVariable", "DataProcessing/SetVariableValue", "languages"}:
+            match = True
+        if match:
+            entries.append({"kind": kind, "name": name, "path": path.relative_to(root).as_posix(), "next_call": {"kind": kind, "name": name}})
+    return {"entries": entries[:limit], "matched_count": len(entries), "truncated": len(entries) > limit, "limit": limit, "execution_context_required": ["frontend_js_or_backend_csharp", "json_default_or_expression_or_variable_selector"]}
+
+
+def get_cpm_knowledge(kind: str, name: str, max_chars: int = 12000, query: str = "", limit: int = 20) -> dict[str, Any]:
+    """Read an allow-listed topic, or discover existing topics with kind='catalog', query and limit."""
     try:
         if not isinstance(kind, str) or not isinstance(name, str):
             raise SnapshotError("INVALID_ARGUMENT", "kind 和 name 必须是字符串")
@@ -334,6 +354,10 @@ def get_cpm_knowledge(kind: str, name: str, max_chars: int = 12000) -> dict[str,
         actual_max = min(max_chars, MAX_KNOWLEDGE_CHARS)
         config, manager, context = _prepare(False)
         root = _snapshot_root(config)
+        if kind == "catalog":
+            if not isinstance(query, str) or len(query) > 200 or isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+                raise SnapshotError("INVALID_ARGUMENT", "catalog query <=200 characters, limit=1..100")
+            return {**context, "ok": True, "kind": kind, **_knowledge_catalog(root, query or ("" if name == "main" else name), limit)}
         path = _knowledge_path(root, kind, name)
         if not path.is_file():
             raise SnapshotError("KNOWLEDGE_NOT_FOUND", f"知识主题不存在: {kind}/{name}")
@@ -349,7 +373,9 @@ def get_cpm_knowledge(kind: str, name: str, max_chars: int = 12000) -> dict[str,
             "max_chars": actual_max,
         }
     except SnapshotError as exc:
-        return _error_response(exc)
+        result = _error_response(exc)
+        result["next_call"] = {"kind": "catalog", "name": "main", "query": "", "limit": 20}
+        return result
     except Exception as exc:
         return _error_response(SnapshotError("KNOWLEDGE_READ_FAILED", str(exc)[:1000]))
 

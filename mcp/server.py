@@ -101,6 +101,10 @@ def inspect_action(
     focus_fields: list[str] | None = None,
     include_generated_csharp: bool = False,
     max_nodes: int = 20,
+    max_output_bytes: int = 32768,
+    value_path: str | None = None,
+    value_offset: int = 0,
+    value_limit: int = 2048,
 ) -> dict[str, Any]:
     """Inspect compact node facts; opt in to params/C# only after narrowing the location."""
     return service().inspect_action(
@@ -119,6 +123,10 @@ def inspect_action(
         focus_fields=focus_fields,
         include_generated_csharp=include_generated_csharp,
         max_nodes=max_nodes,
+        max_output_bytes=max_output_bytes,
+        value_path=value_path,
+        value_offset=value_offset,
+        value_limit=value_limit,
     )
 
 
@@ -138,6 +146,10 @@ def inspect_control_flow(
     at_time: str | None = None,
     max_nodes: int = 120,
     max_edges: int = 240,
+    follow_calls: bool = False,
+    max_call_depth: int = 2,
+    max_actions: int = 8,
+    max_output_bytes: int = 32768,
 ) -> dict[str, Any]:
     """Reconstruct complete control blocks, dependency graphs and static scenario paths."""
     return service().inspect_control_flow(
@@ -156,6 +168,10 @@ def inspect_control_flow(
         at_time=at_time,
         max_nodes=max_nodes,
         max_edges=max_edges,
+        follow_calls=follow_calls,
+        max_call_depth=max_call_depth,
+        max_actions=max_actions,
+        max_output_bytes=max_output_bytes,
     )
 
 
@@ -192,9 +208,9 @@ def trace_dynamic_exception(
     )
 
 
-def diagnose_codex_input(text: str, at_time: str | None = None) -> dict[str, Any]:
+def diagnose_codex_input(text: str, at_time: str | None = None, context: dict[str, Any] | None = None) -> dict[str, Any]:
     """Accept raw Codex natural-language or stack-trace input and route the diagnosis."""
-    return service().diagnose_codex_input(text, at_time=at_time)
+    return service().diagnose_codex_input(text, at_time=at_time, context=context)
 
 
 def describe_table(table: str) -> dict[str, Any]:

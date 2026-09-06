@@ -4,6 +4,7 @@ import hashlib
 import json
 import re
 from typing import Any
+from .canvas_references import called_identity, expression_references, node_references, select_groups
 
 
 def _compact(value: Any) -> str:
@@ -309,13 +310,7 @@ def _where_filters(input_params: dict[str, Any]) -> list[dict[str, Any]]:
 def _contains_identifier(value: Any, identifier: str) -> bool:
     if not identifier:
         return False
-    return bool(
-        re.search(
-            rf"(?<![A-Za-z0-9_]){re.escape(identifier)}(?![A-Za-z0-9_])",
-            str(value or ""),
-            re.IGNORECASE,
-        )
-    )
+    return any(reference["symbol"].casefold() == identifier.casefold() for reference in expression_references(str(value or ""), "read", "expression"))
 
 
 def node_facts(node: dict[str, Any]) -> dict[str, Any]:
@@ -397,21 +392,22 @@ def node_facts(node: dict[str, Any]) -> dict[str, Any]:
         facts["output_variables"] = list(dict.fromkeys(outputs))
         facts["output_parameters"] = output_parameters
     action_name = input_params.get("actionName", {})
-    if isinstance(action_name, dict) and any(action_name.get(k) for k in ("code", "id", "name", "label")):
+    if isinstance(action_name, dict) and any(action_name.get(k) for k in ("code", "id", "name", "label", "value")):
         facts["called_action"] = {
             "code": str(action_name.get("code", "")),
             "id": str(action_name.get("id", "")),
             "name": str(action_name.get("name", "") or action_name.get("label", "")),
+            **called_identity(action_name, element_key),
         }
         call_params = []
-        for value in input_params.values():
+        for parameter_key, value in input_params.items():
             if isinstance(value, dict) and value.get("paramName"):
                 call_params.append(
                     {
                         "name": str(value.get("paramName")),
                         "expression": _parameter(value),
                         "data_type": str(value.get("dataType", "")),
-                        "source_path": "paramsValue.inputParams",
+                        "source_path": f"paramsValue.inputParams.{parameter_key}",
                     }
                 )
         if call_params:
@@ -451,6 +447,7 @@ def node_facts(node: dict[str, Any]) -> dict[str, Any]:
         facts["api_routes"] = list(dict.fromkeys(api_routes))[:8]
     if service_symbols:
         facts["service_symbols"] = list(dict.fromkeys(service_symbols))[:8]
+    facts["references"] = node_references(node)
     return {key: value for key, value in facts.items() if value not in (None, "", [], {})}
 
 
@@ -1070,7 +1067,7 @@ class ControlFlowAnalyzer:
                     facts = node_facts(node)
                     called = facts.get("called_action") or {}
                     if called:
-                        identity = str(called.get("code") or called.get("id") or called.get("name"))
+                        identity = str(called.get("target_group_key") or called.get("target_action_identifier") or f"unresolved:{group['group_key']}:{index}")
                         target = f"action:{identity}"
                         add_node(target, "action", identity)
                         add_edge(canvas_id, target, "calls")
@@ -1097,12 +1094,12 @@ class ControlFlowAnalyzer:
                         add_edge(canvas_id, target, "maps_field")
                     defined = str(facts.get("defined_variable", ""))
                     if defined:
-                        target = f"variable:{defined}"
+                        target = f"variable:{group['group_key']}:{defined}"
                         add_node(target, "variable", defined)
                         add_edge(canvas_id, target, "defines")
                     assigned = str(facts.get("assignment_target", ""))
                     if assigned:
-                        target = f"variable:{assigned}"
+                        target = f"variable:{group['group_key']}:{assigned}"
                         add_node(target, "variable", assigned)
                         add_edge(canvas_id, target, "assigns")
 
@@ -1181,11 +1178,10 @@ class ControlFlowAnalyzer:
         max_nodes = max(1, min(int(max_nodes), 300))
         max_edges = max(1, min(int(max_edges), 600))
         analysis = self.analyze(data)
-        groups = [
-            item
-            for item in analysis["groups"]
-            if not group or group.lower() in f"{item['group_title']} {item['group_key']}".lower()
-        ]
+        identities = [{"key": item["group_key"], "title": item["group_title"]} for item in analysis["groups"]]
+        selected_identities, group_resolution = select_groups(identities, group)
+        selected_keys = {item["key"] for item in selected_identities}
+        groups = [item for item in analysis["groups"] if item["group_key"] in selected_keys]
         summaries = [
             {
                 key: item[key]
@@ -1266,6 +1262,8 @@ class ControlFlowAnalyzer:
             views = {key: value for key, value in views.items() if key in requested}
         return {
             "schema_version": analysis["schema_version"],
+            "graph_schema_version": "2.0",
+            "group_resolution": group_resolution,
             "structure_status": status,
             "scope": {
                 "mode": "summary" if summary_only else scope,
@@ -1317,11 +1315,10 @@ class CanvasInspector:
             data = json.loads(data)
         terms = [term.lower() for term in (terms or []) if term]
         result = []
-        for group_index, action_group in enumerate(data.get("actionData", []) or []):
+        selected_groups, selection = select_groups(data.get("actionData", []) or [], group)
+        for group_index, action_group in enumerate(selected_groups):
             group_title = str(action_group.get("title", ""))
             group_key = str(action_group.get("key", ""))
-            if group and group.lower() not in f"{group_title} {group_key}".lower():
-                continue
             nodes = action_group.get("data", []) or []
             control = self.control_flow.analyze_group(action_group, group_index)
             locations = {
@@ -1363,6 +1360,12 @@ class CanvasInspector:
                 }
                 if include_params:
                     item["paramsValue"] = node.get("paramsValue", {})
+                called = item["facts"].get("called_action")
+                if called and called.get("kind") == "local":
+                    targets = [candidate for candidate in data.get("actionData", []) if candidate.get("key") == called.get("target_group_key")]
+                    called["resolution_status"] = "resolved" if len(targets) == 1 else "ambiguous" if targets else "unresolved"
+                for reference in item["facts"].get("references", []):
+                    reference["scope"] = group_key
                 result.append(item)
         return result
 
@@ -1657,6 +1660,9 @@ class CanvasInspector:
         for node in nodes:
             facts = node.get("facts") or {}
             matches: dict[str, Any] = {}
+            references = [reference for reference in facts.get("references", []) if reference["symbol"].casefold() in requested]
+            if references:
+                matches["references"] = references
             for fact_name in ("field_mappings", "filters", "call_parameters"):
                 fact_items = facts.get(fact_name) or []
                 selected = []

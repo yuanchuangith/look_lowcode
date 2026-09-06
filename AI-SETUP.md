@@ -7,7 +7,7 @@
 - 不读取、输出、记录或通过命令参数传递平台密码和数据库密码。
 - 密码只通过隐藏输入保存到操作系统凭据存储：Windows Credential Manager、macOS Keychain 或 Linux Secret Service。
 - Linux 没有可用的安全 keyring 后端时停止配置并提示安装系统 keyring，不得回退到明文文件。
-- CPM、开发库 Schema 和源码业务链能力仅注册到本地 stdio；HTTP MCP 注册 16 个 Look 工具，本地 stdio 另含 5 个 CPM、7 个 Schema/可信关系和 7 个源码工具，共 35 个。
+- CPM、开发库 Schema 和源码业务链能力仅注册到本地 stdio；HTTP MCP 固定注册 16 个基础 Look 工具，本地 stdio 另含 5 个 CPM、7 个 Schema/可信关系和 7 个源码工具，共 35 个。
 
 ## 前置检查
 
@@ -61,7 +61,7 @@ sh ./scripts/configure_cpm.sh
 
 配置成功会立即完成首次全量拉取。数据库连接是独立可选步骤，使用对应的 `configure_connection.ps1` 或 `configure_connection.sh`。
 
-Schema 快照需要本机数据库连接。远程否定策略使用内置 HTTPS 地址和共享 scope，全部免鉴权；新电脑安装后不需要迁移令牌。需要覆盖默认策略地址或 scope 时执行：
+Schema 快照需要本机数据库连接。远程关系策略只保存 opaque relation ID、否决/恢复审计和版本元数据，不接收 Schema、表名、字段名或业务值；默认使用内置 HTTPS 地址和共享 scope。需要覆盖策略地址或 scope 时执行：
 
 ```powershell
 ./scripts/configure_schema.ps1 --policy-url https://POLICY_HOST --scope DEV_DB_SCOPE
@@ -97,7 +97,7 @@ cpm status
 cpm whoami
 ```
 
-通过标准：插件来源为 `look-lowcode-local` 且版本为 `0.3.1+codex.*`；`cpm --version` 输出 `0.3.1`；`cpm status` 显示 1800 秒 TTL；`cpm whoami` 发起轻量在线请求并确认 token 有效，失败时退出码非零。
+通过标准：插件来源为 `look-lowcode-local` 且版本为 `0.3.1+codex.*`；`cpm --version` 输出 `0.3.1`；`cpm status` 显示配置中的 CPM TTL，默认 1800 秒；如需在线认证检查再运行 `cpm whoami`，不要把它作为源码/Schema 本地工具的必需步骤。
 
 日常命令：
 
@@ -107,3 +107,5 @@ cpm pull --page <Route或Id或OutId>
 cpm pull --if-stale
 cpm whoami
 ```
+
+`cpm pull` 会更新本地 CPM 快照；源码索引和 Schema 快照分别由首次使用或过期后的对应 MCP 工具按需刷新，不会因为插件安装自动执行开发库全量扫描。
