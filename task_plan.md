@@ -1,5 +1,17 @@
 # Task Plan: Local Schema Snapshot and Trusted Relations
 
+## Test-entry and Claude installer repair 2026-09-06
+- [complete] Implement portable unittest entry, protocol-based verification, and non-destructive links.
+- [complete] Add regression tests and usage documentation.
+- [complete] Run focused/full tests and actual launcher verification without installing: 215 tests, 3 live skips; 35 tools verified through initialize/ping/tools/list.
+- Preserve pre-existing modifications to installer, AGENTS, setup documentation, and README.
+
+## Test-entry and Claude installer audit 2026-09-06
+- [complete] Inspect test discovery, runtime dependencies, and installer behavior.
+- [complete] Reproduce unittest entry points and run offline tests: 195 tests, 3 skipped, 18.551 seconds.
+- [complete] Report confirmed gaps and existing support without installing or changing application code.
+- Tool note: piped apply_patch rejected UTF-8 input; use direct executable argument.
+
 ## Goal
 Implementation 2026-09-06 (approved): implement both accuracy stages, run regression and paired conversation replay, then update only the local plugin. Baseline: F:/Users/25249/AppData/Local/Temp/look-accuracy-baseline-hdpn1l_t (373 files, including existing dirty/untracked source).
 

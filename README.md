@@ -2,6 +2,36 @@
 
 GXP 低代码只读诊断 MCP。服务不会执行数据库写入、画布保存或发布。Windows/macOS/Linux 本地 stdio 包含 16 个 Look 工具、5 个 CPM 快照工具、7 个开发库 Schema/可信关系工具和 7 个本地源码业务链工具，共 35 个；公网 Streamable HTTP 8890 仍只注册 16 个 Look 工具。远端另提供免鉴权的 opaque 关系否决策略 API，但不保存 Schema、源码或业务数据。
 
+## 一键安装与快速上手
+
+详细前置环境与安全凭据配置见 [AI-SETUP.md](AI-SETUP.md)。
+
+- **Codex 平台**：
+  ```powershell
+  python .\scripts\install_codex_plugin.py    # macOS/Linux: python3 ./scripts/install_codex_plugin.py
+  ```
+- **Claude Code 平台**：
+  ```powershell
+  python .\scripts\install_claude.py          # macOS/Linux: python3 ./scripts/install_claude.py
+  ```
+
+## 本地自检
+
+在仓库根目录执行（PowerShell、Windows Git Bash、Linux/macOS 终端通用；只有 `python3` 时替换命令名）：
+
+```bash
+python scripts/run_tests.py
+python scripts/run_tests.py -p test_local_entrypoints.py -v
+python scripts/install_claude.py --verify-only
+```
+
+- 测试入口优先选择已安装的 Look 虚拟环境，遵循 `GXP_LOWCODE_RUNTIME_ROOT`；不存在时使用当前 Python。不会安装依赖或修改插件配置。当前 Python 必须已具备 `requirements.txt` 依赖，可用 `--current-python` 显式指定。
+- 自动设置模块路径并发现测试，不需要 `pytest` 或手工设置 `PYTHONPATH`。无匹配测试、导入错误或断言失败均返回非零退出码。测试数量、耗时以实际输出为准。
+- 默认跳过真实数据库测试，即使外部设置了 `GXP_LIVE_TEST=1`；只有显式传入 `--live` 才启用在线只读检查。
+- Claude 安装默认验证 MCP，`--verify` 显式启用，`--no-verify` 跳过；`--verify-only` 只验证，不安装、不改配置。`--verify-timeout 15` 设置协议交互超时，另预留最多 15 秒清理子进程。
+- 自检通过实际 `scripts/start_mcp.mjs` 启动服务，执行 `initialize`、`ping`、`tools/list`，要求 35 个不重名工具；失败返回非零退出码。这不代表 35 个工具的业务功能或数据库连接均可用，自检不调用业务工具。
+- Windows 使用目录联接，Linux/macOS 使用目录软链接。相同链接重复安装保持不变；仅替换已有链接，遇到真实文件或目录会报错并保留内容，请先手工确认并迁移冲突目录。
+
 ## CPM 本地快照定位
 
 CPM 快照补充页面全貌、菜单、组件、模型、数据集、字典、事件、审批流程、接口和公共动作定位；Look 当前发布副本、画布节点、生成 C#、历史异常和业务记录仍是运行结论的权威证据。

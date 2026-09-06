@@ -32,9 +32,10 @@
 
 推荐直接提供当前现象、期望规则和无匹配行为：
 
-```text
-[$gxp-lowcode-readonly:gxp-lowcode-debug]
+- **Codex 会话开头添加**：`[$gxp-lowcode-readonly:gxp-lowcode-debug]`
+- **Claude Code 会话**：直接输入 `/gxp-lowcode-debug` 或在提问中描述低代码排查
 
+```text
 当前现象：<用户实际看到的结果>
 期望规则：<允许选择或写入的值>
 无匹配时行为：<为空且不可选择 / 允许全部 / 尚未确认>

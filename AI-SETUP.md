@@ -1,6 +1,6 @@
-# Look + CPM 安装指南（由 Codex 执行）
+# Look + CPM 安装指南（由 Codex / Claude 执行）
 
-本文档面向在新电脑上打开本仓库的 Codex。目标是从仓库安装 `gxp-lowcode-readonly` 插件、本地 MCP 运行环境和 `cpm` 命令，不依赖原电脑上的插件缓存或 `deng` 目录。
+本文档面向在新电脑上打开本仓库的 Codex 或 Claude Code。目标是从仓库安装 `gxp-lowcode-readonly` 插件/技能、本地 MCP 运行环境和 `cpm` 命令，不依赖原电脑上的插件缓存或 `deng` 目录。
 
 ## 安全规则
 
@@ -18,16 +18,18 @@ git --version
 python --version        # Windows，要求 >= 3.10
 python3 --version       # macOS/Linux，要求 >= 3.10
 node --version          # 要求 >= 18
-codex --version
+codex --version         # 若使用 Codex
 ```
 
 缺少 Node 时安装当前 LTS；缺少 Python 时安装 3.10 或更高版本。不要使用管理员权限安装本插件。
 
 ## 一键安装插件和运行环境
 
-尚未克隆仓库时先执行 `git clone https://github.com/yuanchuangith/look_lowcode.git` 并进入 `look_lowcode`；仓库中的 `AGENTS.md` 会引导 Codex 使用本指南，不需要人工复制技能目录。
+尚未克隆仓库时先执行 `git clone https://github.com/yuanchuangith/look_lowcode.git` 并进入 `look_lowcode`；仓库中的 `AGENTS.md` 会引导 AI 使用本指南，不需要人工复制技能目录。
 
-在仓库根目录执行一个命令：
+### 1. 为 Codex 安装
+
+在仓库根目录执行对应命令：
 
 Windows：
 
@@ -42,6 +44,24 @@ python3 ./scripts/install_codex_plugin.py
 ```
 
 安装器会创建 Look 虚拟环境、安装版本化 CPM CLI、安装不依赖仓库路径的 `cpm` 命令，并建立 `look-lowcode-local` marketplace 后安装 `gxp-lowcode-readonly`。macOS/Linux 如果提示 `~/.local/bin` 不在 PATH，将它加入 PATH 后重开终端。最后新建 Codex 会话，使新技能和 MCP 工具生效。
+
+### 2. 为 Claude Code 安装
+
+在仓库根目录执行对应命令：
+
+Windows：
+
+```powershell
+python .\scripts\install_claude.py
+```
+
+macOS/Linux：
+
+```bash
+python3 ./scripts/install_claude.py
+```
+
+安装器会自动创建环境、挂载项目级与系统全局级 `.claude/skills/` 联接、将 `.claude/` 自动加入 `.gitignore`、配置 `.mcp.json`，并自检 35 个 MCP 工具的完整注册。在当前会话输入 `/gxp-lowcode-debug` 即可直接使用。
 
 ## 首次配置和拉取
 
@@ -90,6 +110,8 @@ macOS/Linux 使用 `sh scripts/configure_source_repositories.sh` 和对应绝对
 
 ## 验收
 
+### Codex 验收
+
 ```text
 codex plugin list
 cpm --version
@@ -98,6 +120,14 @@ cpm whoami
 ```
 
 通过标准：插件来源为 `look-lowcode-local` 且版本为 `0.3.1+codex.*`；`cpm --version` 输出 `0.3.1`；`cpm status` 显示配置中的 CPM TTL，默认 1800 秒；如需在线认证检查再运行 `cpm whoami`，不要把它作为源码/Schema 本地工具的必需步骤。
+
+### Claude Code 验收
+
+```powershell
+python .\scripts\install_claude.py --skip-runtime
+```
+
+通过标准：输出 `[OK] MCP Tool verification passed: 35 tools registered.`，且在 Claude Code 输入 `/gxp-lowcode-debug` 可识别该技能。
 
 日常命令：
 
