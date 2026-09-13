@@ -638,8 +638,17 @@ LIMIT {max(1, min(max_rows, 100))}
         }
         clauses: list[str] = []
         params: list[Any] = []
-        for item in filters or []:
-            column = validate_identifier(str(item.get("field", "")), "filter field")
+        for index, item in enumerate(filters or []):
+            if not isinstance(item, dict):
+                raise ValueError(
+                    f"Filter at index {index} must be an object with a non-empty 'field'"
+                )
+            raw_field = item.get("field")
+            if not isinstance(raw_field, str) or not raw_field.strip():
+                raise ValueError(
+                    f"Filter at index {index} must include a non-empty 'field'"
+                )
+            column = validate_identifier(raw_field.strip(), "filter field")
             if column.lower() not in known:
                 raise ValueError(f"Unknown filter column {column!r} in {table}")
             actual = known[column.lower()]

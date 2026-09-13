@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, NotRequired, Required, TypedDict
 
 MCP_DIR = Path(__file__).resolve().parent
 if str(MCP_DIR) not in sys.path:
@@ -218,15 +218,44 @@ def describe_table(table: str) -> dict[str, Any]:
     return service().describe_table(table)
 
 
+RecordOperator = Literal[
+    "eq",
+    "ne",
+    "lt",
+    "lte",
+    "gt",
+    "gte",
+    "like",
+    "in",
+    "not_in",
+    "is_null",
+    "not_null",
+]
+
+
+class RecordFilter(TypedDict, total=False):
+    """A single narrow condition accepted by :func:`get_records`."""
+
+    field: Required[str]
+    operator: NotRequired[RecordOperator]
+    value: NotRequired[Any]
+
+
 def get_records(
     table: str,
-    filters: list[dict[str, Any]],
+    filters: list[RecordFilter],
     columns: list[str] | None = None,
     order_by: str | None = None,
     descending: bool = False,
     limit: int = 50,
 ) -> dict[str, Any]:
-    """Read narrowly filtered business records with structured operators and a hard limit."""
+    """Read narrowly filtered business records with structured operators and a hard limit.
+
+    Each filter must include a non-empty ``field`` containing a column name. Supported
+    operators are ``eq``, ``ne``, ``lt``, ``lte``, ``gt``, ``gte``, ``like``, ``in``,
+    ``not_in``, ``is_null`` and ``not_null``. Call ``describe_table`` first to obtain
+    valid column names; never send an empty ``field``.
+    """
     return service().get_records(
         table,
         filters=filters,

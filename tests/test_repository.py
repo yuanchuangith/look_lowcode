@@ -40,6 +40,36 @@ class QueueDatabase:
 
 
 class RepositoryTests(unittest.TestCase):
+    def test_get_records_rejects_missing_or_blank_filter_field(self) -> None:
+        repository = object.__new__(GxpRepository)
+        repository._columns = lambda table: {"id": "id"}
+
+        for filters in ([{}], [{"field": ""}], [{"field": "   "}], [None]):
+            with self.subTest(filters=filters):
+                with self.assertRaisesRegex(ValueError, "non-empty 'field'"):
+                    repository.get_records("items", filters=filters)
+
+    def test_get_records_trims_valid_filter_field(self) -> None:
+        class Database:
+            @contextmanager
+            def session(self, **kwargs):
+                class Session:
+                    def query(self, sql, params, *, max_rows):
+                        self.sql = sql
+                        self.params = params
+                        return [], False
+
+                yield Session()
+
+        repository = GxpRepository(Database())
+        repository._columns = lambda table: {"id": "id"}
+
+        result = repository.get_records(
+            "items", filters=[{"field": " id ", "value": 1}]
+        )
+
+        self.assertEqual([], result["rows"])
+
     def test_form_name_query_parameterizes_multilingual_like_pattern(self) -> None:
         repository = object.__new__(GxpRepository)
         session = FormattingSession()
