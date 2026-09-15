@@ -23,8 +23,6 @@ def install(client: str, client_home: Path) -> dict[str, str]:
         "references/business-rules.md": SOURCE / "references/business-rules.md",
         "references/acceptance-cases.md": SOURCE / "references/acceptance-cases.md",
     }
-    if client == "codex":
-        files["agents/openai.yaml"] = SOURCE / "agents/openai.yaml"
     payloads = {name: source.read_bytes() for name, source in files.items()}
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     backup = client_home / "skill-backups" / f"{NAME}-{stamp}"
