@@ -105,7 +105,6 @@ class SchemaSnapshotTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.config = SchemaSnapshotConfig(
             snapshot_dir=str(Path(self.temp.name) / "snapshot"),
-            policy_url="http://localhost:8890",
             policy_scope_id="shared-dev",
         )
         self.policy = FakePolicy()

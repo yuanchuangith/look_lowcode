@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any, Literal, NotRequired, Required, TypedDict
+from typing import Annotated, Any, Literal, NotRequired, Required, TypedDict
+
+from pydantic import Field
 
 MCP_DIR = Path(__file__).resolve().parent
 if str(MCP_DIR) not in sys.path:
@@ -208,8 +210,41 @@ def trace_dynamic_exception(
     )
 
 
-def diagnose_codex_input(text: str, at_time: str | None = None, context: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Accept raw Codex natural-language or stack-trace input and route the diagnosis."""
+ConversationInput = Annotated[
+    dict[str, Any],
+    Field(json_schema_extra={
+        "additionalProperties": False,
+        "properties": {
+            "goal": {"description": "Current diagnostic goal."},
+            "anchors": {
+                "type": "array", "maxItems": 8,
+                "items": {
+                    "type": "object",
+                    "properties": {key: {"type": "string"} for key in (
+                        "action_code", "ref_id", "page", "group_key", "node_key", "design_id"
+                    )},
+                },
+            },
+            "rules": {"description": "Business rules stated by the user."},
+            "exclusions": {"description": "Items explicitly excluded by the user."},
+            "field_meanings": {"description": "User-confirmed field meanings."},
+            "chosen_approach": {"description": "Implementation approach selected by the user."},
+            "findings": {"description": "Stable finding IDs and their review status."},
+            "corrections": {"description": "Latest user corrections to previous claims."},
+        },
+    }),
+]
+
+
+def diagnose_codex_input(text: str, at_time: str | None = None, context: ConversationInput | None = None) -> dict[str, Any]:
+    """Accept raw natural-language or stack-trace input and route the diagnosis.
+
+    Put the current request in text. Optional context is a JSON object (at most 32 KiB)
+    using only goal, anchors, rules, exclusions, field_meanings, chosen_approach,
+    findings and corrections. Omit context on a first call. For follow-ups, pass
+    the previous conversation_context.record, not the whole response or messages.
+    Example context: {"anchors": [{"action_code": "ACTION01"}]}.
+    """
     return service().diagnose_codex_input(text, at_time=at_time, context=context)
 
 

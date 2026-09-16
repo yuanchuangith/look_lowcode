@@ -9,9 +9,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
-
 from .schema_config import schema_runtime_root
 
 
@@ -32,8 +29,7 @@ def utc_now() -> str:
 
 
 def default_policy_file_path() -> Path:
-    configured = os.environ.get("GXP_RELATION_POLICY_FILE")
-    return Path(configured).expanduser().resolve() if configured else schema_runtime_root() / "relation-policy.json"
+    return schema_runtime_root() / "relation-policy-local.json"
 
 
 def _identifier(value: str, label: str) -> str:
@@ -190,15 +186,37 @@ class RelationPolicyStore:
         self._mutate(lambda _: None)
         return {"ok": True, "storage": "json", "schema_payload": False}
 
-    def create_scope(self, scope_id: str) -> dict[str, Any]:
+    def has_scope(self, scope_id: str) -> bool:
+        return _identifier(scope_id, "scope_id") in self._read()["scopes"]
+
+    def create_scope(self, scope_id: str, *, initial_policy: dict[str, Any] | None = None) -> dict[str, Any]:
         scope_id = _identifier(scope_id, "scope_id")
         now = utc_now()
 
         def create(value: dict[str, Any]) -> dict[str, Any]:
+            if scope_id in value["scopes"]:
+                return dict(value["scopes"][scope_id])
             scope = value["scopes"].setdefault(scope_id, {
                 "scope_id": scope_id, "revision": 0, "created_at": now,
             })
             value["decisions"].setdefault(scope_id, {})
+            if initial_policy is not None:
+                revision = max(0, int(initial_policy.get("revision", 0)))
+                rejected = {_relation_id(item) for item in initial_policy["rejections"]}
+                restores = {_relation_id(key): int(item) for key, item in initial_policy.get("restore_revisions", {}).items()}
+                if any(item < 0 or item > revision for item in restores.values()):
+                    raise ValueError("invalid cached restore revision")
+                scope["revision"] = revision
+                scope["imported_from"] = "existing_local_cache"
+                for relation in rejected | restores.keys():
+                    value["decisions"][scope_id][relation] = {
+                        "relation_id": relation,
+                        "state": "rejected" if relation in rejected else "restored",
+                        "last_restore_revision": restores.get(relation, 0),
+                        "reason_code": "imported_local_cache",
+                        "client_id": "local_cache_migration",
+                        "created_at": now, "updated_at": now,
+                    }
             return dict(scope)
 
         return self._mutate(create)
@@ -230,7 +248,7 @@ class RelationPolicyStore:
     def reject(self, scope_id: str, relation_id: str, reason_code: str) -> dict[str, Any]:
         scope_id = _identifier(scope_id, "scope_id")
         relation_id = _relation_id(relation_id)
-        client_id = "public"
+        client_id = "local"
         if reason_code not in REASON_CODES:
             raise ValueError("invalid reason_code")
         now = utc_now()
@@ -268,7 +286,7 @@ class RelationPolicyStore:
     def restore(self, scope_id: str, relation_id: str) -> dict[str, Any]:
         scope_id = _identifier(scope_id, "scope_id")
         relation_id = _relation_id(relation_id)
-        client_id = "public"
+        client_id = "local"
         now = utc_now()
 
         def restore_relation(value: dict[str, Any]) -> dict[str, Any]:
@@ -300,48 +318,3 @@ class RelationPolicyStore:
             }
 
         return self._mutate(restore_relation)
-
-
-def add_relation_policy_routes(app, store: RelationPolicyStore | None = None) -> None:
-    policy_store = store or RelationPolicyStore()
-
-    async def health(_: Request) -> Response:
-        return JSONResponse(policy_store.health())
-
-    async def get_scope(request: Request) -> Response:
-        try:
-            scope_id = request.path_params["scope_id"]
-            payload = policy_store.snapshot(scope_id)
-            etag = f'"policy-v2-{payload["revision"]}"'
-            if request.headers.get("if-none-match") == etag:
-                return Response(status_code=304, headers={"ETag": etag})
-            return JSONResponse(payload, headers={"ETag": etag})
-        except ValueError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
-
-    async def reject(request: Request) -> Response:
-        try:
-            scope_id = request.path_params["scope_id"]
-            relation_id = request.path_params["relation_id"]
-            body = await request.json() if request.headers.get("content-length") != "0" else {}
-            reason_code = str((body or {}).get("reason_code") or "user_confirmed_incorrect")
-            return JSONResponse(policy_store.reject(scope_id, relation_id, reason_code))
-        except (json.JSONDecodeError, ValueError) as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
-
-    async def restore(request: Request) -> Response:
-        try:
-            scope_id = request.path_params["scope_id"]
-            relation_id = request.path_params["relation_id"]
-            return JSONResponse(policy_store.restore(scope_id, relation_id))
-        except ValueError as exc:
-            return JSONResponse({"error": str(exc)}, status_code=400)
-
-    app.add_route("/relation-policy/v1/health", health, methods=["GET"])
-    app.add_route("/relation-policy/v1/scopes/{scope_id}", get_scope, methods=["GET"])
-    app.add_route(
-        "/relation-policy/v1/scopes/{scope_id}/relations/{relation_id}", reject, methods=["PUT"]
-    )
-    app.add_route(
-        "/relation-policy/v1/scopes/{scope_id}/relations/{relation_id}", restore, methods=["DELETE"]
-    )

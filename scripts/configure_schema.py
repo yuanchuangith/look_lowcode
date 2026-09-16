@@ -13,30 +13,30 @@ if str(MCP_DIR) not in sys.path:
 
 from gxp_core.schema_config import (
     SchemaSnapshotConfig,
-    default_schema_snapshot_dir,
+    load_schema_config,
     save_schema_config,
 )
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Configure the local Schema snapshot and remote relation policy")
-    parser.add_argument("--policy-url", required=True)
-    parser.add_argument("--scope", required=True)
-    parser.add_argument("--snapshot-dir", type=Path, default=default_schema_snapshot_dir())
+    parser = argparse.ArgumentParser(description="Configure the local Schema snapshot and local relation decisions")
+    parser.add_argument("--scope", help="Local namespace for relationship IDs")
+    parser.add_argument("--snapshot-dir", type=Path)
     args = parser.parse_args()
-    config = SchemaSnapshotConfig(
-        snapshot_dir=str(args.snapshot_dir.expanduser().resolve()),
-        policy_url=args.policy_url,
-        policy_scope_id=args.scope,
-    )
+    from dataclasses import asdict
+    settings = asdict(load_schema_config())
+    if args.snapshot_dir is not None:
+        settings["snapshot_dir"] = str(args.snapshot_dir.expanduser().resolve())
+    if args.scope is not None:
+        settings["policy_scope_id"] = args.scope
+    config = SchemaSnapshotConfig.from_dict(settings)
     path = save_schema_config(config)
     print(json.dumps({
         "ok": True,
         "config_path": str(path),
         "snapshot_dir": config.snapshot_dir,
-        "policy_url": config.policy_url,
+        "policy_storage": "local",
         "policy_scope_id": config.policy_scope_id,
-        "authentication": "disabled",
     }, ensure_ascii=False, indent=2))
     return 0
 

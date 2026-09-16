@@ -34,6 +34,11 @@ async def verify(root: str, mode: str) -> dict:
                 payload = result.structuredContent or json.loads(result.content[0].text)
                 if name == "diagnose_codex_input":
                     assert payload["context_anchor_reused"]
+                    reused = await session.call_tool(name, {"text": "改了再看看", "context": payload["conversation_context"]["record"]})
+                    assert not reused.isError, reused
+                    invalid = await session.call_tool(name, {"text": "改了再看看", "context": {"history": []}})
+                    assert invalid.isError, invalid
+                    assert "unsupported fields: history" in invalid.content[0].text, invalid
                 elif name == "inspect_control_flow":
                     assert payload["call_flow"]["runtime_verified"] is False
                 elif "value_path" in arguments:
@@ -41,7 +46,7 @@ async def verify(root: str, mode: str) -> dict:
                 else:
                     assert payload["field_match_count"] == 1
                     assert payload["generated_csharp_scope"]["status"] == "resolved_method"
-            return {"registry": mode, "tools": len(tools.tools), "fixture_calls_passed": len(calls), "business_database_access": False}
+            return {"registry": mode, "tools": len(tools.tools), "fixture_calls_passed": len(calls) + 2, "business_database_access": False}
 
 
 async def verify_launcher(root: str) -> dict:

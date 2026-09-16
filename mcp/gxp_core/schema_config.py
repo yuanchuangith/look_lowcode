@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ipaddress
 import json
 import os
 import sys
@@ -8,14 +7,12 @@ import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 DEFAULT_SCHEMA_TTL_SECONDS = 86400
 DEFAULT_REFRESH_TIMEOUT_SECONDS = 300
 DEFAULT_QUERY_TIMEOUT_MS = 10000
 DEFAULT_VALIDATION_CONCURRENCY = 2
 DEFAULT_MIN_DISTINCT_VALUES = 20
-DEFAULT_POLICY_URL = "https://43-135-137-212.sslip.io:8892"
 DEFAULT_POLICY_SCOPE_ID = "gxp-development"
 
 
@@ -68,20 +65,9 @@ def default_schema_snapshot_dir() -> Path:
     return schema_runtime_root() / "schema-snapshot"
 
 
-def _is_local_http(parsed) -> bool:
-    host = (parsed.hostname or "").lower()
-    if host == "localhost":
-        return True
-    try:
-        return ipaddress.ip_address(host).is_loopback
-    except ValueError:
-        return False
-
-
 @dataclass(frozen=True)
 class SchemaSnapshotConfig:
     snapshot_dir: str = str(default_schema_snapshot_dir())
-    policy_url: str = DEFAULT_POLICY_URL
     policy_scope_id: str = DEFAULT_POLICY_SCOPE_ID
     ttl_seconds: int = DEFAULT_SCHEMA_TTL_SECONDS
     refresh_timeout_seconds: int = DEFAULT_REFRESH_TIMEOUT_SECONDS
@@ -96,7 +82,6 @@ class SchemaSnapshotConfig:
             raise ValueError("schema.json 不得包含密码、令牌或密钥字段")
         config = cls(
             snapshot_dir=str(raw.get("snapshot_dir") or default_schema_snapshot_dir()),
-            policy_url=str(raw.get("policy_url", DEFAULT_POLICY_URL)).rstrip("/"),
             policy_scope_id=str(raw.get("policy_scope_id", DEFAULT_POLICY_SCOPE_ID)).strip(),
             ttl_seconds=int(raw.get("ttl_seconds", DEFAULT_SCHEMA_TTL_SECONDS)),
             refresh_timeout_seconds=int(raw.get("refresh_timeout_seconds", DEFAULT_REFRESH_TIMEOUT_SECONDS)),
@@ -110,11 +95,6 @@ class SchemaSnapshotConfig:
     def validate(self) -> None:
         if not Path(self.snapshot_dir).is_absolute():
             raise ValueError("snapshot_dir 必须是绝对路径")
-        parsed = urlparse(self.policy_url)
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            raise ValueError("policy_url 必须是有效 HTTP(S) 地址")
-        if parsed.scheme != "https" and not _is_local_http(parsed):
-            raise ValueError("远程 policy_url 必须使用 HTTPS；HTTP 仅允许 localhost")
         if not self.policy_scope_id:
             raise ValueError("policy_scope_id 不能为空")
         if not 1 <= self.validation_concurrency <= 2:

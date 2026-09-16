@@ -19,38 +19,64 @@ class PolicyRepairContracts(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory()
         self.root = Path(self.temporary.name)
-        self.config = SchemaSnapshotConfig(snapshot_dir=str(self.root / "schema"), policy_url="http://policy.test", policy_scope_id="shared-dev")
+        self.config = SchemaSnapshotConfig(snapshot_dir=str(self.root / "schema"), policy_scope_id="shared-dev")
         self.enterContext(patch("gxp_core.policy_client.schema_policy_cache_path", return_value=self.root / "policy-cache.json"))
+        self.enterContext(patch("gxp_core.relation_policy.default_policy_file_path", return_value=self.root / "local-policy.json"))
         self.enterContext(patch("gxp_core.schema_snapshot.schema_lock_path", return_value=self.root / "schema.lock"))
         self.enterContext(patch("gxp_core.schema_snapshot.schema_status_path", return_value=self.root / "status.json"))
 
     def tearDown(self):
         self.temporary.cleanup()
 
-    def test_mutation_discards_etag_and_resyncs_all_relations(self):
-        client = RelationPolicyClient(self.config)
-        payload = {"scope_id": "shared-dev", "revision": 0, "protocol_version": 2, "restore_revisions": {}, "rejections": []}
-        updated = {**payload, "revision": 2, "rejections": [{"relation_id": "a" * 64}, {"relation_id": "b" * 64}]}
-        with patch.object(client, "_request", side_effect=[(200, payload, '"policy-v2-0"'), (200, {"revision": 2}, None), (200, updated, '"policy-v2-2"')]) as request:
-            client.sync()
+    def test_local_decisions_persist_without_network_access(self):
+        with patch("urllib.request.urlopen", side_effect=AssertionError("network forbidden")) as request:
+            client = RelationPolicyClient(self.config)
+            self.assertEqual([], client.sync()["rejections"])
             client.reject("a" * 64, "wrong_columns")
-        self.assertIsNone(request.call_args_list[-1].kwargs["etag"])
-        self.assertEqual(["a" * 64, "b" * 64], client._load_cache()["rejections"])
-        self.assertEqual('"policy-v2-2"', client._load_cache()["etag"])
+            second = RelationPolicyClient(self.config)
+            self.assertEqual(["a" * 64], second.sync()["rejections"])
+            restored = second.restore("a" * 64)
+            self.assertEqual([], client.sync()["rejections"])
+            self.assertEqual(restored["revision"], client.sync()["restore_revisions"]["a" * 64])
+            request.assert_not_called()
 
-    def test_old_cache_requests_full_protocol_metadata(self):
-        (self.root / "policy-cache.json").write_text(json.dumps({"scope_id": "shared-dev", "revision": 4, "rejections": []}), encoding="utf-8")
+    def test_existing_local_cache_is_imported_once(self):
+        cache = {"scope_id": "shared-dev", "revision": 4, "protocol_version": 2,
+                 "rejections": ["a" * 64], "restore_revisions": {"b" * 64: 3}}
+        (self.root / "policy-cache.json").write_text(json.dumps(cache), encoding="utf-8")
         client = RelationPolicyClient(self.config)
-        with patch.object(client, "_request", return_value=(200, {"scope_id": "shared-dev", "revision": 4, "rejections": []}, '"4"')) as request:
-            result = client.sync()
-        self.assertIsNone(request.call_args.kwargs["etag"])
-        self.assertEqual(1, result["protocol_version"])
+        result = client.sync()
+        self.assertEqual(["a" * 64], result["rejections"])
+        self.assertEqual({"b" * 64: 3}, result["restore_revisions"])
+        client.restore("a" * 64)
+        self.assertEqual([], RelationPolicyClient(self.config).sync()["rejections"])
+        other = RelationPolicyClient(SchemaSnapshotConfig(snapshot_dir=str(self.root / "schema"), policy_scope_id="other"))
+        self.assertEqual([], other.sync()["rejections"])
 
-    def test_invalid_protocol_does_not_reuse_cache(self):
-        client = RelationPolicyClient(self.config)
-        with patch.object(client, "_request", return_value=(200, {"scope_id": "shared-dev", "revision": 4, "protocol_version": 2, "rejections": []}, '"4"')):
-            with self.assertRaises(PolicyUnavailable):
-                client.sync()
+    def test_invalid_local_store_fails_without_network_fallback(self):
+        (self.root / "local-policy.json").write_text("broken", encoding="utf-8")
+        with patch("urllib.request.urlopen", side_effect=AssertionError("network forbidden")) as request:
+            with self.assertRaisesRegex(PolicyUnavailable, "local relation policy unavailable"):
+                RelationPolicyClient(self.config).sync()
+            request.assert_not_called()
+
+    def test_local_restore_invalidates_previous_validation(self):
+        policy = RelationPolicyClient(self.config)
+        manager = SchemaSnapshotManager(self.config, database=FakeDatabase(), policy=policy)
+        manager.repository = FakeRepository()
+        manager.refresh(force=True)
+        verified = manager.resolve("orders", ["user_id"])
+        self.assertEqual("data_verified", verified["status"])
+        relation = verified["relation"]["relation_id"]
+        manager.reject(relation)
+        self.assertEqual("rejected", manager.resolve("orders", ["user_id"], target_table="users", target_columns=["id"])["status"])
+        manager.restore(relation)
+        self.assertEqual("live_verified", manager.resolve("orders", ["user_id"])["status"])
+
+    def test_remote_era_validation_is_not_reused_as_local_evidence(self):
+        from gxp_core.schema_snapshot import _policy_allows
+        old = {"relation_id": "a" * 64, "policy_revision_at_validation": 0}
+        self.assertFalse(_policy_allows(old, RelationPolicyClient(self.config).sync()))
 
     def test_truncated_candidates_are_never_unique(self):
         schema = json.loads(json.dumps(SCHEMA))

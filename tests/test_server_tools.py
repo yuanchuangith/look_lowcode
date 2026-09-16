@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import inspect
+import asyncio
 import unittest
+
+from gxp_core.conversation import CONTEXT_FIELDS
 
 from server import (
     LOCAL_CPM_TOOLS,
@@ -15,6 +18,17 @@ from server import (
 
 
 class ServerToolRegistrationTests(unittest.TestCase):
+    def test_context_schema_documents_the_fields_accepted_by_the_service(self) -> None:
+        for local in (True, False):
+            app = create_mcp(include_local_cpm=local, include_local_schema=local, include_local_source=local)
+            tool = next(tool for tool in asyncio.run(app.list_tools()) if tool.name == "diagnose_codex_input")
+            schema = tool.inputSchema["properties"]["context"]
+            context = next(item for item in schema["anyOf"] if item.get("type") == "object")
+            self.assertEqual(CONTEXT_FIELDS, set(context["properties"]))
+            self.assertFalse(context["additionalProperties"])
+            self.assertEqual(8, context["properties"]["anchors"]["maxItems"])
+            self.assertIn("conversation_context.record", tool.description)
+
     def test_new_readonly_tools_are_registered(self) -> None:
         names = {tool.__name__ for tool in MCP_TOOLS}
         self.assertIn("search_pages", names)

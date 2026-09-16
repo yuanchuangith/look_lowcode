@@ -7,6 +7,8 @@
 diagnose_codex_input(text, at_time?, context?) 接受一个最多32 KiB的 JSON 对象。合法字段为 goal、anchors、rules、exclusions、field_meanings、chosen_approach、findings、corrections。
 anchors 最多8项，身份字段 action_code、ref_id、page、group_key、node_key、design_id 都是字符串。只有 action_code/RefId 已确认时才能用于动作复用。规则内容是用户声明，不是数据库已验证事实。
 
+首次调用可以省略 `context`，将用户当前原话放在 `text`。追问复用上次返回结果时，只取 `conversation_context.record` 作为新的 `context`，不要传整个 `conversation_context` 包装对象、完整工具返回值或 `messages/history` 聊天记录。遇到非法字段提示时，按上述八个字段重新整理，保留已有规则、排除项和纠正后重试，不要通过丢弃这些约束绕过校验。
+
 ```json
 {
   "goal": "本轮复核的目标",

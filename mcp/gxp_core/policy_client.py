@@ -2,16 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
 from typing import Any
-from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
 
-from .schema_config import (
-    SchemaSnapshotConfig,
-    _atomic_json,
-    schema_policy_cache_path,
-)
+from .schema_config import SchemaSnapshotConfig, schema_policy_cache_path
+from .relation_policy import RelationPolicyStore
 
 
 class PolicyUnavailable(RuntimeError):
@@ -36,107 +30,42 @@ def relation_id(
     return hashlib.sha256("\0".join(parts).encode("utf-8")).hexdigest()
 
 
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
 class RelationPolicyClient:
+    """Local-only decisions; the class name is retained for existing callers."""
+
     def __init__(self, config: SchemaSnapshotConfig):
         self.config = config
-        self.cache_path = schema_policy_cache_path()
+        self.store = RelationPolicyStore()
+        self._initialized = False
 
-    def _load_cache(self) -> dict[str, Any]:
-        try:
-            value = json.loads(self.cache_path.read_text(encoding="utf-8"))
-            if value.get("scope_id") == self.config.policy_scope_id and isinstance(value.get("rejections"), list):
-                return value
-        except (OSError, json.JSONDecodeError, AttributeError):
-            pass
-        return {
-            "scope_id": self.config.policy_scope_id,
-            "revision": -1,
-            "rejections": [],
-            "fetched_at": None,
-        }
-
-    def _request(self, method: str, path: str, *, body: dict[str, Any] | None = None, etag: str | None = None) -> tuple[int, dict[str, Any] | None, str | None]:
-        headers = {"Accept": "application/json"}
-        data = None
-        if body is not None:
-            data = json.dumps(body, ensure_ascii=False).encode("utf-8")
-            headers["Content-Type"] = "application/json"
-        if etag:
-            headers["If-None-Match"] = etag
-        request = Request(f"{self.config.policy_url}{path}", data=data, headers=headers, method=method)
-        try:
-            with urlopen(request, timeout=10) as response:
-                payload = json.loads(response.read().decode("utf-8")) if response.status != 204 else None
-                return response.status, payload, response.headers.get("ETag")
-        except HTTPError as exc:
-            if exc.code == 304:
-                return 304, None, exc.headers.get("ETag")
-            detail = ""
+    def _initialize(self) -> None:
+        if self._initialized:
+            return
+        # Import only a cache already on this computer. Never fetch remote history.
+        if not self.store.has_scope(self.config.policy_scope_id):
             try:
-                detail = str(json.loads(exc.read().decode("utf-8")).get("error", ""))[:160]
-            except Exception:
-                pass
-            raise PolicyUnavailable(f"relation policy HTTP {exc.code}: {detail or 'request failed'}") from exc
-        except (URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
-            raise PolicyUnavailable(f"relation policy unavailable: {type(exc).__name__}") from exc
+                cached = json.loads(schema_policy_cache_path().read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                cached = None
+            if not isinstance(cached, dict) or cached.get("scope_id") != self.config.policy_scope_id:
+                cached = None
+            self.store.create_scope(self.config.policy_scope_id, initial_policy=cached)
+        self._initialized = True
 
     def sync(self) -> dict[str, Any]:
-        cache = self._load_cache()
-        etag = cache.get("etag")
-        status, payload, response_etag = self._request(
-            "GET", f"/relation-policy/v1/scopes/{self.config.policy_scope_id}", etag=etag
-        )
-        if status == 304:
-            if not etag or int(cache.get("revision", -1)) < 0:
-                raise PolicyUnavailable("relation policy returned 304 without a complete cached snapshot")
-            cache["fetched_at"] = _now()
-            _atomic_json(self.cache_path, cache)
-            return cache
-        if not payload or payload.get("scope_id") != self.config.policy_scope_id:
-            raise PolicyUnavailable("relation policy returned an invalid scope payload")
+        """Read the current local decisions, without network access."""
         try:
-            version = int(payload.get("protocol_version", 1))
-            restores = payload["restore_revisions"] if version >= 2 else {}
-            revision = int(payload["revision"])
-            restores = {str(relation): int(value) for relation, value in restores.items()}
-            if any(value < 0 or value > revision for value in restores.values()):
-                raise ValueError("invalid restore revision")
-            normalized = {
-                "scope_id": self.config.policy_scope_id,
-                "revision": revision,
-                "protocol_version": version,
-                "restore_revisions": restores,
-                "etag": response_etag,
-                "rejections": sorted({str(item["relation_id"]) for item in payload.get("rejections", [])}),
-                "fetched_at": _now(),
-            }
-        except (KeyError, TypeError, ValueError, AttributeError) as exc:
-            raise PolicyUnavailable("relation policy returned invalid version metadata") from exc
-        _atomic_json(self.cache_path, normalized)
-        return normalized
-
-    def _resync_after_mutation(self) -> None:
-        cache = self._load_cache()
-        cache["etag"] = None
-        cache["revision"] = -1
-        _atomic_json(self.cache_path, cache)
-        self.sync()
+            self._initialize()
+            payload = self.store.snapshot(self.config.policy_scope_id)
+            return {**payload, "storage": "local",
+                    "rejections": [item["relation_id"] for item in payload["rejections"]]}
+        except (OSError, RuntimeError, ValueError, TypeError, KeyError) as exc:
+            raise PolicyUnavailable(f"local relation policy unavailable: {type(exc).__name__}") from exc
 
     def reject(self, relation: str, reason_code: str) -> dict[str, Any]:
-        _, payload, _ = self._request(
-            "PUT", f"/relation-policy/v1/scopes/{self.config.policy_scope_id}/relations/{relation}",
-            body={"reason_code": reason_code},
-        )
-        self._resync_after_mutation()
-        return payload or {}
+        self.sync()
+        return {**self.store.reject(self.config.policy_scope_id, relation, reason_code), "storage": "local"}
 
     def restore(self, relation: str) -> dict[str, Any]:
-        _, payload, _ = self._request(
-            "DELETE", f"/relation-policy/v1/scopes/{self.config.policy_scope_id}/relations/{relation}"
-        )
-        self._resync_after_mutation()
-        return payload or {}
+        self.sync()
+        return {**self.store.restore(self.config.policy_scope_id, relation), "storage": "local"}

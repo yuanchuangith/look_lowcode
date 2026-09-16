@@ -72,7 +72,7 @@ def source_probes(root):
 
 
 def manager(root, name, policy, repository=None):
-    config = SchemaSnapshotConfig(snapshot_dir=str(root / name), policy_url="http://localhost:8890", policy_scope_id="shared-dev")
+    config = SchemaSnapshotConfig(snapshot_dir=str(root / name), policy_scope_id="shared-dev")
     instance = SchemaSnapshotManager(config, database=FakeDatabase(), policy=policy)
     instance.repository = repository or FakeRepository()
     return instance

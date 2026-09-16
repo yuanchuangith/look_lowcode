@@ -80,6 +80,9 @@ def _relation_matches(item: dict[str, Any], source_table: str, source_columns: l
 
 
 def _policy_allows(relation: dict[str, Any], policy: dict[str, Any]) -> bool:
+    # Remote-era verification does not prove uniqueness under this computer's decisions.
+    if policy.get("storage") == "local" and relation.get("policy_storage") != "local":
+        return False
     revision = relation.get("policy_revision_at_validation")
     if not isinstance(revision, int) or revision < 0 or revision > int(policy.get("revision", -1)):
         return False
@@ -131,6 +134,12 @@ class SchemaSnapshotManager:
     def status(self) -> dict[str, Any]:
         manifest = self._manifest()
         status = _read_json(schema_status_path(), {})
+        try:
+            policy = self.policy.sync()
+            policy_status = {"available": True, "storage": "local", "scope_id": self.config.policy_scope_id,
+                             "revision": policy["revision"], "error": None}
+        except PolicyUnavailable as exc:
+            policy_status = {"available": False, "storage": "local", "error": str(exc)}
         return {
             "configured": True,
             "snapshot_dir": str(self.root),
@@ -140,7 +149,7 @@ class SchemaSnapshotManager:
             "stale": not self._fresh(manifest),
             "schema_fingerprint": manifest.get("schema_fingerprint"),
             "counts": manifest.get("counts", {}),
-            "policy": manifest.get("policy", {}),
+            "policy": policy_status,
             "last_error": status.get("last_error"),
         }
 
@@ -225,7 +234,7 @@ class SchemaSnapshotManager:
                         min_distinct_values=self.config.min_distinct_values,
                         deadline=validation_deadline,
                     )
-                    return {**candidate, "relation_id": rid, "status": evidence["reason"], "evidence": evidence, "policy_revision_at_validation": validation_revision}
+                    return {**candidate, "relation_id": rid, "status": evidence["reason"], "evidence": evidence, "policy_revision_at_validation": validation_revision, "policy_storage": (policy_payload or {}).get("storage")}
                 except Exception as exc:
                     message = f"{type(exc).__name__}: {str(exc)[:160]}"
                     lowered = message.lower()
@@ -296,6 +305,7 @@ class SchemaSnapshotManager:
                 "candidate_group_complete": True,
                 "candidate_group_relations": [candidate["relation_id"] for candidate in group],
                 "policy_revision_at_validation": item["policy_revision_at_validation"],
+                "policy_storage": item.get("policy_storage"),
                 "cardinality": "one_to_one" if item["evidence"]["source_unique"] else "many_to_one",
                 "verified_at": verified_at,
                 "schema_fingerprint": fingerprint,
@@ -353,6 +363,7 @@ class SchemaSnapshotManager:
                     "verified_relations": len(verified),
                 },
                 "policy": {
+                    "storage": "local",
                     "available": policy_payload is not None,
                     "scope_id": self.config.policy_scope_id,
                     "revision": (policy_payload or {}).get("revision"),
@@ -472,7 +483,7 @@ class SchemaSnapshotManager:
         if target_table and target_columns:
             rid = relation_id(self.config.policy_scope_id, source_table, source_columns, target_table, target_columns)
             if rid in rejected:
-                return {"status": "rejected", "evidence_layer": "远程用户否决", "relation_id": rid, "policy_revision": policy["revision"]}
+                return {"status": "rejected", "evidence_layer": "本机用户否决", "relation_id": rid, "policy_revision": policy["revision"]}
         manifest = self._manifest()
         verified = _read_json(self.root / "relations" / "verified.json", [])
         cached = [item for item in verified if _relation_matches(item, source_table, source_columns, target_table, target_columns)]
@@ -506,7 +517,7 @@ class SchemaSnapshotManager:
             ):
                 continue
             rid = relation_id(self.config.policy_scope_id, source_table, source_columns, target["table_name"], target_cols)
-            attempt = {**candidate, "relation_id": rid, "policy_revision_at_validation": int(policy["revision"])}
+            attempt = {**candidate, "relation_id": rid, "policy_revision_at_validation": int(policy["revision"]), "policy_storage": policy.get("storage")}
             attempts.append(attempt)
             if rid in rejected:
                 attempt["status"] = "rejected_by_policy"
@@ -533,7 +544,7 @@ class SchemaSnapshotManager:
 
     def reject(self, relation: str, reason_code: str = "user_confirmed_incorrect") -> dict[str, Any]:
         result = self.policy.reject(relation, reason_code)
-        return {"evidence_layer": "远程用户否决", **result}
+        return {"evidence_layer": "本机用户否决", **result}
 
     def restore(self, relation: str) -> dict[str, Any]:
         with _FileLock(schema_lock_path(), float(self.config.refresh_timeout_seconds)):
@@ -544,7 +555,7 @@ class SchemaSnapshotManager:
                 remaining = [item for item in verified if item.get("relation_id") != relation]
                 if len(remaining) != len(verified):
                     _atomic_json(verified_path, remaining)
-        return {"evidence_layer": "远程用户否决", **result}
+        return {"evidence_layer": "本机用户否决", **result}
 
 
 def schema_snapshot_status() -> dict[str, Any]:
@@ -585,10 +596,10 @@ def resolve_table_relation(
 
 
 def reject_table_relation(relation_id: str, reason_code: str = "user_confirmed_incorrect") -> dict[str, Any]:
-    """Persist an explicit user rejection remotely using only an opaque relationship ID."""
+    """Persist an explicit user rejection only on this computer; never contact a policy server."""
     return SchemaSnapshotManager().reject(relation_id, reason_code)
 
 
 def restore_table_relation(relation_id: str) -> dict[str, Any]:
-    """Restore a remotely rejected relationship and require fresh data validation."""
+    """Restore a locally rejected relationship and require fresh data validation."""
     return SchemaSnapshotManager().restore(relation_id)

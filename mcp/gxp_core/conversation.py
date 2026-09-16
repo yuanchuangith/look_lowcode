@@ -13,8 +13,18 @@ RECHECK = re.compile(r"改了|修改|发布|复核|再看|解决了|recheck|revi
 def conversation_context(value: dict[str, Any] | None, text: str) -> dict[str, Any] | None:
     if value is None:
         return None
-    if not isinstance(value, dict) or set(value) - CONTEXT_FIELDS:
-        raise ValueError("context must use the documented conversation fields")
+    if not isinstance(value, dict):
+        raise ValueError(
+            "context must be a JSON object, not " + type(value).__name__
+            + "; put the current request in text and omit context on a first call"
+        )
+    unknown = set(value) - CONTEXT_FIELDS
+    if unknown:
+        raise ValueError(
+            "context has unsupported fields: " + ", ".join(sorted(map(str, unknown)))
+            + ". Allowed fields: " + ", ".join(sorted(CONTEXT_FIELDS))
+            + ". For follow-ups, pass conversation_context.record, not the whole response"
+        )
     try:
         encoded = json.dumps(value, ensure_ascii=False, allow_nan=False)
     except (TypeError, ValueError, RecursionError) as exc:

@@ -64,6 +64,21 @@ class ConversationAccuracyTests(unittest.TestCase):
             with self.subTest(value_type=type(value)), self.assertRaises(ValueError):
                 conversation_context(value, "review")
 
+    def test_context_errors_explain_how_to_retry(self):
+        with self.assertRaisesRegex(ValueError, "JSON object, not list"):
+            conversation_context([], "review")
+        with self.assertRaisesRegex(ValueError, "unsupported fields: history.*Allowed fields:.*anchors"):
+            conversation_context({"history": []}, "review")
+        returned = conversation_context({"exclusions": ["hours"]}, "review")
+        with self.assertRaisesRegex(ValueError, "pass conversation_context.record"):
+            conversation_context(returned, "review")
+
+    def test_returned_record_can_be_reused_without_losing_constraints(self):
+        context = {"anchors": [{"action_code": "ACTION01"}], "rules": ["rule"],
+                   "exclusions": ["hours"], "corrections": [{"new": "corrected"}]}
+        returned = conversation_context(context, "review")
+        self.assertEqual(context, conversation_context(returned["record"], "review")["record"])
+
     def test_field_read_condition_loop_and_return(self):
         nodes = [
             node("condition", "IfCondition", {"condition": {"Filters": [{"target": {"code": "trainingType"}, "equalTo": "Equal", "value": {"code": '"initial"'}}]}}),

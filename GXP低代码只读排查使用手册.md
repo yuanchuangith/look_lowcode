@@ -183,13 +183,13 @@ include_generated_csharp=false
 
 执行 `setup.ps1` 后也可在任意目录使用全局命令：`cpm status`、`cpm whoami`（在线验证 token）、`cpm pull`、`cpm pull --page <Route或Id或OutId>`、`cpm pull --if-stale`。
 
-### Schema 快照和远程关系策略
+### Schema 快照和本机关系否决
 
 - Schema 与关系明细只保存在本地系统数据目录，TTL 为 86400 秒。
 - 推断关系要求目标唯一键、兼容字段类型、至少 20 个不同非空来源键以及 100% 全量匹配。
-- 远端只保存 opaque relation ID、状态、策略 revision 和审计元数据，不接收表名、字段名或业务值。
-- 每次使用推断关系前同步远程策略；策略状态不新鲜时只展示数据库声明外键。
-- 用户明确指出关系错误时提交永久否决，次日刷新会在查询数据前跳过该关系；恢复后重新验证。远程策略 API 免鉴权，仅保存 opaque ID 和标准审计元数据。
+- 否决、恢复版本和审计只保存在本机 `relation-policy-local.json`，不上传服务器或跨电脑同步。
+- 每次使用推断关系前读取本机否决记录；文件无法读取时只展示数据库声明外键。
+- 用户明确指出关系错误时保存本机持久否决，次日刷新会在查询数据前跳过该关系；恢复后重新验证。首次使用只导入本机已有的同 scope 旧缓存，不下载服务器历史。
 - 快照关系过期、歧义或与故障证据冲突时实时查询开发库，实时结果不写回快照。
 
 新电脑可让 Codex 完整读取根目录 `AI-SETUP.md` 后执行 `scripts/install_codex_plugin.py`。macOS/Linux 使用对应 `.sh` 入口；快照分别位于 `~/Library/Application Support/GxpLowcodeReadonly/cpm-snapshot` 或 `${XDG_DATA_HOME:-~/.local/share}/GxpLowcodeReadonly/cpm-snapshot`，密码保存到 macOS Keychain 或 Linux Secret Service。

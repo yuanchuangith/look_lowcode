@@ -45,7 +45,7 @@ class RepairRegressions(unittest.TestCase):
         self.temporary.cleanup()
 
     def manager(self, name, policy, repository=None):
-        config = SchemaSnapshotConfig(snapshot_dir=str(self.root / name), policy_url="http://localhost:8890", policy_scope_id="shared-dev")
+        config = SchemaSnapshotConfig(snapshot_dir=str(self.root / name), policy_scope_id="shared-dev")
         manager = SchemaSnapshotManager(config, database=FakeDatabase(), policy=policy)
         manager.repository = repository or FakeRepository()
         return manager

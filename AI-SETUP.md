@@ -81,10 +81,10 @@ sh ./scripts/configure_cpm.sh
 
 配置成功会立即完成首次全量拉取。数据库连接是独立可选步骤，使用对应的 `configure_connection.ps1` 或 `configure_connection.sh`。
 
-Schema 快照需要本机数据库连接。远程关系策略只保存 opaque relation ID、否决/恢复审计和版本元数据，不接收 Schema、表名、字段名或业务值；默认使用内置 HTTPS 地址和共享 scope。需要覆盖策略地址或 scope 时执行：
+Schema 快照需要本机数据库连接。关系否决、恢复审计和版本元数据只保存在本机 `relation-policy-local.json`，不再连接策略服务器。首次使用导入本机已有的同 scope 旧缓存；旧配置中的远程地址被忽略。需要设置本地 scope 时执行：
 
 ```powershell
-./scripts/configure_schema.ps1 --policy-url https://POLICY_HOST --scope DEV_DB_SCOPE
+./scripts/configure_schema.ps1 --scope DEV_DB_SCOPE
 ```
 
 macOS/Linux 使用 `sh scripts/configure_schema.sh`。首次调用 Schema 工具时生成本地快照，此后按 86400 秒 TTL 刷新。
@@ -106,7 +106,7 @@ macOS/Linux 使用 `sh scripts/configure_source_repositories.sh` 和对应绝对
 
 ## 可信关系与源码索引升级
 
-先升级兼容协议 v2 的策略服务，再运行本仓库安装器更新插件。策略使用逐关系恢复版本及版本化 ETag；旧客户端缓存不含协议元数据时，新客户端会获取完整快照。源码索引 v3 按 layer 懒重建，旧关系缺少验证版本时按需重验，不触发无关 CPM 拉取或全库压力测试。回退时保留最新策略与审计文件。
+运行本仓库安装器更新插件即可，无需策略服务器。否决和恢复保留本机逐关系版本，切换前的关系验证按需重验，已有表结构缓存保留。源码索引 v3 按 layer 懒重建，不触发无关 CPM 拉取或全库压力测试。服务器历史文件不自动删除。
 
 ## 验收
 

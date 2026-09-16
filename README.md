@@ -1,6 +1,6 @@
 # gxp-lowcode-readonly
 
-GXP 低代码只读诊断 MCP。服务不会执行数据库写入、画布保存或发布。Windows/macOS/Linux 本地 stdio 包含 16 个 Look 工具、5 个 CPM 快照工具、7 个开发库 Schema/可信关系工具和 7 个本地源码业务链工具，共 35 个；公网 Streamable HTTP 8890 仍只注册 16 个 Look 工具。远端另提供免鉴权的 opaque 关系否决策略 API，但不保存 Schema、源码或业务数据。
+GXP 低代码只读诊断 MCP。服务不会执行数据库写入、画布保存或发布。Windows/macOS/Linux 本地 stdio 包含 16 个 Look 工具、5 个 CPM 快照工具、7 个开发库 Schema/可信关系工具和 7 个本地源码业务链工具，共 35 个；公网 Streamable HTTP 8890 仍只注册 16 个 Look 工具。关系否决和恢复仅保存在本机，不提供远程策略 API。
 
 ## 一键安装与快速上手
 
@@ -46,38 +46,30 @@ CPM 快照补充页面全貌、菜单、组件、模型、数据集、字典、�
 
 ## 开发库 Schema 快照与可信关系
 
-本地 Schema 快照每天首次使用时刷新，读取 `information_schema` 中的表、字段、备注、索引与约束。逻辑关系只有在目标键唯一、字段类型兼容、至少 20 个不同非空来源键且开发库全量匹配率为 100% 时进入可信图谱。验证仅保存计数，不保存或上传业务值。
+本地 Schema 快照每天首次使用时刷新，读取 `information_schema` 中的表、字段、备注、索引与约束。关系判断先由 Codex 结合任务语义和 Schema 证据提出、解释并筛选候选；当 Codex 无法形成明确且可验证的结论时，回退到脚本候选生成，再由数据库聚合验证。逻辑关系只有在目标键唯一、字段类型兼容、至少 20 个不同非空来源键且开发库全量匹配率为 100% 时进入可信图谱。验证仅保存计数，不保存或上传业务值。
 
 - `schema_snapshot_status()`：查看刷新时间、Schema 指纹、关系数量和策略 revision。
 - `refresh_schema_snapshot(force=false)`：刷新本地 Schema 与全量验证关系。
 - `search_database_schema(...)` / `inspect_table_schema(...)`：按名称、备注定位并检查表结构。
 - `resolve_table_relation(...)`：关系不新鲜、歧义或冲突时实时查开发库；结果不回写每日快照。
-- `reject_table_relation(...)`：用户明确确认关系错误时写入远程永久否决。
+- `reject_table_relation(...)`：用户明确确认关系错误时写入本机持久否决。
 - `restore_table_relation(...)`：恢复一个已否决 relation ID，并强制重新验证。
 
-默认策略地址为 `https://43-135-137-212.sslip.io:8892`，共享 scope 为 `gxp-development`，新电脑安装后可直接同步否定记录。需要覆盖默认值时使用 `scripts/configure_schema.ps1` 或 `scripts/configure_schema.sh`：
+否决、恢复版本和审计保存在系统数据目录的 `GxpLowcodeReadonly/relation-policy-local.json`，不再访问策略服务器或跨电脑同步。首次使用会一次性导入本机已有、同 scope 的 `relation-policy-cache.json`，保留该缓存文件；不会下载服务器历史。旧配置中的 `policy_url` 被忽略，重新保存配置时移除。可选配置本地 scope：
 
 ```powershell
-./scripts/configure_schema.ps1 --policy-url https://POLICY_HOST --scope DEV_DB_SCOPE
+./scripts/configure_schema.ps1 --scope DEV_DB_SCOPE
 ```
 
-远端首次部署只需创建共享 scope：
-
-```bash
-python scripts/manage_relation_policy.py create-scope DEV_DB_SCOPE
-```
-
-策略服务使用 `GXP_RELATION_POLICY_FILE` 指定原子 JSON 文件；只保存 scope、revision、opaque relation ID、标准原因码和审计时间。所有策略 API 均免鉴权，`GXP_LOWCODE_HTTP_ALLOWED_HOSTS` 可追加 HTTPS 反向代理 Host。
-
-当前服务器可使用 `https://43-135-137-212.sslip.io:8892` 作为策略地址；Nginx 配置见 `deploy/gxp-lowcode-readonly-https-8892.conf`，它使用现有证书反向代理到本机 8890 服务。
+本地 scope 自动创建，无需部署策略服务。已有服务器历史文件不会由客户端删除。
 
 ## 可信门禁与兼容升级
 
 - 源码索引 v3 自动按需重建；旧 layer、仓库歧义、源文件变化或索引代次冲突返回明确状态，健康 layer 的结果保留。
 - 前端请求通过词法边界与函数作用域解析；后端通过全限定符号、签名和接收类型连接，保留包装器不确定性与未解析调用。
 - 自动关系要求同组候选验证完整；超时、异常、截断均不等同于排除候选。显式目标验证通过返回 `verification_scope=explicit_target`。
-- 关系策略协议 v2 增加逐关系恢复版本；恢复会使各机器旧验证失效，同组竞争候选恢复也会使旧唯一性失效。旧表结构缓存保留、旧关系按需重验。
-- 服务先升级，再安装客户端。新客户端连接旧服务按 scope revision 保守失效；回退服务代码时保留最新策略 JSON 与审计。
+- 本地记录保留逐关系恢复版本；恢复会使本机旧验证及同组候选的旧唯一性失效。切换前的关系验证按需重验，表结构缓存保留。
+- 安装器更新客户端后即可使用本地记录，无需连接或升级策略服务器。
 
 协议与验收说明见 `docs/optimization-repair-contract.md`。
 
@@ -210,4 +202,4 @@ LoadCredential=db-password:/etc/gxp-lowcode-readonly/db-password
 2. 数据库白名单/ACL 允许服务主机 `43.135.137.212` 使用专用只读账号连接。
 3. CPM 页面 Network 中请求直达 `43.135.137.212:8890/mcp`，完成 Session、CORS 和至少一次真实只读工具调用。
 
-历史服务器验收曾列出 11 个工具；当前本地 stdio 定义为 35 个工具，HTTP MCP 入口固定为 16 个 Look 工具。远程服务器只需为关系策略 API 提供 HTTPS 和持久化原子 JSON；开发库访问、Schema 快照和源码索引均留在本地。
+历史服务器验收曾列出 11 个工具；当前本地 stdio 定义为 35 个工具，HTTP MCP 入口固定为 16 个 Look 工具。关系否决记录、开发库 Schema 快照和源码索引均留在本地，HTTP 服务不再注册关系策略 API。
