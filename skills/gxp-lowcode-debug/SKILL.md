@@ -7,6 +7,8 @@ description: Use this skill when the user asks to 排查或复核 GXP 低代码�
 
 通过 `gxp-lowcode-readonly` MCP 从真实 ActionDesign、只读业务证据和本地 metadata-only 源码索引定位问题。不要询问、读取、输出或转述数据库连接信息。
 
+当前配置的数据库及其查询结果默认按开发环境理解，只有用户明确说明当前配置连接的是生产、测试或其他环境时才覆盖；用户仅要求“排查生产／正式／线上问题”不代表当前连接属于该环境，不得因此将当前库的查询结果当作生产数据或据此确认生产结论。
+
 ## CPM 快照路由
 
 页面全貌、菜单入口、组件绑定、模型影响面、审批流程和接口问题，先用本地 CPM 快照形成候选范围；动作 code/RefId、草稿/发布、历史发布、画布分组节点、生成 C# 和业务记录仍以 Look 当前只读数据库工具为权威。涉及这些跨层定位时，先完整读取 `references/cpm-snapshot-routing.md`。
