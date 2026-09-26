@@ -398,7 +398,9 @@ LIMIT {safe_limit}
             }
         return matches[0]
 
-    def _design_select(self, *, include_content: bool) -> tuple[str, dict[str, str]]:
+    def _design_select(
+        self, *, include_content: bool, include_hashes: bool = True
+    ) -> tuple[str, dict[str, str]]:
         columns = self._columns("cpm_bizflows_design")
         aliases: dict[str, str] = {}
         candidates = {
@@ -426,16 +428,20 @@ LIMIT {safe_limit}
             data_column = self._pick(columns, "data", required=True)
             csharp_column = self._pick(columns, "csharp_code", "csharpCode")
             parts.append(f"LENGTH(`{data_column}`) AS `data_length`")
-            parts.append(f"SHA2(`{data_column}`,256) AS `data_sha256`")
             if csharp_column:
                 parts.append(
                     f"LENGTH(IFNULL(`{csharp_column}`,'')) AS `csharp_length`"
                 )
-                parts.append(
-                    f"SHA2(IFNULL(`{csharp_column}`,''),256) AS `csharp_sha256`"
-                )
             else:
-                parts.extend(["0 AS `csharp_length`", "SHA2('',256) AS `csharp_sha256`"])
+                parts.append("0 AS `csharp_length`")
+            if include_hashes:
+                parts.append(f"SHA2(`{data_column}`,256) AS `data_sha256`")
+                if csharp_column:
+                    parts.append(
+                        f"SHA2(IFNULL(`{csharp_column}`,''),256) AS `csharp_sha256`"
+                    )
+                else:
+                    parts.append("SHA2('',256) AS `csharp_sha256`")
         return ", ".join(parts), aliases
 
     def get_design_versions(
@@ -444,8 +450,11 @@ LIMIT {safe_limit}
         *,
         include_deleted: bool = True,
         include_content: bool = False,
+        include_hashes: bool = True,
     ) -> list[dict[str, Any]]:
-        select_list, aliases = self._design_select(include_content=include_content)
+        select_list, aliases = self._design_select(
+            include_content=include_content, include_hashes=include_hashes
+        )
         ref_column = aliases.get("ref_id") or self._pick(
             self._columns("cpm_bizflows_design"), "ref_Id", "ref_id", required=True
         )
@@ -469,17 +478,59 @@ LIMIT {safe_limit}
             rows, _ = session.query(sql, {"ref_id": ref_id}, max_rows=100)
         results: list[dict[str, Any]] = []
         for row in rows:
-            item = _row_json(row)
-            item["version"] = "published" if bool(item.get("is_publish")) else "draft"
-            if include_content:
-                item["data"] = _text(row.get("data"))
-                item["csharp_code"] = _text(row.get("csharp_code"))
-                item["data_sha256"] = hashlib.sha256(item["data"].encode()).hexdigest()
-                item["csharp_sha256"] = hashlib.sha256(
-                    item["csharp_code"].encode()
-                ).hexdigest()
-            results.append(item)
+            results.append(self._design_row(row, include_content=include_content))
         return results
+
+    @staticmethod
+    def _design_row(row: dict[str, Any], *, include_content: bool) -> dict[str, Any]:
+        item = _row_json(row)
+        item["version"] = "published" if bool(item.get("is_publish")) else "draft"
+        if include_content:
+            item["data"] = _text(row.get("data"))
+            item["csharp_code"] = _text(row.get("csharp_code"))
+            item["data_sha256"] = hashlib.sha256(item["data"].encode()).hexdigest()
+            item["csharp_sha256"] = hashlib.sha256(
+                item["csharp_code"].encode()
+            ).hexdigest()
+        return item
+
+    def _load_design_content(
+        self,
+        ref_id: str,
+        selected: dict[str, Any],
+        *,
+        include_deleted: bool,
+    ) -> dict[str, Any]:
+        """Load content for one already-selected design row.
+
+        Version selection is performed from the small metadata query above. The
+        content query is then keyed by the design id so a large action history
+        does not require transferring every design JSON/C# payload.
+        """
+        select_list, aliases = self._design_select(include_content=True)
+        ref_column = aliases["ref_id"]
+        id_column = aliases.get("design_id")
+        deleted_column = aliases.get("is_deleted")
+        if not id_column:
+            raise RepositoryError(
+                "cpm_bizflows_design.id is required to load one design payload"
+            )
+
+        where = f"`{ref_column}`=%(ref_id)s AND `{id_column}`=%(design_id)s"
+        params: dict[str, Any] = {
+            "ref_id": ref_id,
+            "design_id": selected.get("design_id"),
+        }
+        if not include_deleted and deleted_column:
+            where += f" AND `{deleted_column}`=0"
+        sql = f"SELECT {select_list} FROM `cpm_bizflows_design` WHERE {where} LIMIT 1"
+        with self.database.session(timeout_ms=10000) as session:
+            rows, _ = session.query(sql, params, max_rows=1)
+        if not rows:
+            raise RepositoryError(
+                f"Design payload not found for ref_Id={ref_id}, design_id={selected.get('design_id')}"
+            )
+        return self._design_row(rows[0], include_content=True)
 
     def load_design(
         self,
@@ -492,8 +543,13 @@ LIMIT {safe_limit}
     ) -> dict[str, Any]:
         if version not in {"published", "draft"}:
             raise ValueError("version must be published or draft")
+        # Select the target version from metadata only. Fetch the large JSON/C#
+        # payload after the target row is known, using its primary key.
         versions = self.get_design_versions(
-            ref_id, include_deleted=include_deleted, include_content=True
+            ref_id,
+            include_deleted=include_deleted,
+            include_content=False,
+            include_hashes=False,
         )
         if design_id:
             versions = [item for item in versions if _text(item.get("design_id")) == design_id]
@@ -520,6 +576,12 @@ LIMIT {safe_limit}
             detail = f" at {at_time}" if at_time else ""
             raise RepositoryError(f"No {version} design found for ref_Id={ref_id}{detail}")
         item = versions[0]
+        if "data" not in item:
+            item = self._load_design_content(
+                ref_id,
+                item,
+                include_deleted=include_deleted,
+            )
         try:
             item["data_json"] = json.loads(item.get("data") or "{}")
         except json.JSONDecodeError as exc:
