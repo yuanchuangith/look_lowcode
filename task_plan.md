@@ -1,5 +1,19 @@
 # Task Plan: Local Schema Snapshot and Trusted Relations
 
+## Business logic graph implementation 2026-09-29
+- [complete] Inspect the supplied plan, reusable JSON persistence and MCP/Skill contracts.
+- [complete] Implement guarded local storage, stable IDs/fingerprints, revision history, invalidation, migration and graceful degradation.
+- [complete] Add three stdio-only tools; update Skill/reference, fixture, docs, installer verification counts and plugin version 0.4.0.
+- [complete] Run graph, registration, Skill and full regression tests; verify fresh MCP protocol discovery and graph calls without database configuration.
+- Verification boundary: 259 tests, 253 passed, 3 live skips and 3 pre-existing environment-test errors, reproduced independently on unmodified HEAD d7bbae5. No plugin installation or live business validation performed.
+
+### Implementation errors and resolutions
+- Initial PowerShell output decoded UTF-8 as the Windows default code page; use explicit UTF-8 reads/output. Unix head/tail/heredoc syntax failed in PowerShell; use native commands and here-strings.
+- System Python 3.10 could not import existing typing.NotRequired; repository test entry selects the installed Python 3.12 runtime.
+- Initial patch contexts/duplicate-path operations were rejected; inspect unchanged state and reapply focused patches. First graph tests needed the locked public read method; fixed and reran.
+- Sandbox full regression could not open nine existing runtime lock files; approved escalated rerun removed those errors.
+- Three environment regressions remain baseline defects (missing DatabaseConfig.environment and missing diagnosis integration), confirmed in an isolated git archive of HEAD. They are outside this graph implementation.
+
 ## Test-entry and Claude installer repair 2026-09-06
 - [complete] Implement portable unittest entry, protocol-based verification, and non-destructive links.
 - [complete] Add regression tests and usage documentation.

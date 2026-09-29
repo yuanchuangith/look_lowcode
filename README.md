@@ -1,6 +1,6 @@
 # gxp-lowcode-readonly
 
-GXP 低代码只读诊断 MCP。服务不会执行数据库写入、画布保存或发布。Windows/macOS/Linux 本地 stdio 包含 16 个 Look 工具、5 个 CPM 快照工具、7 个开发库 Schema/可信关系工具和 7 个本地源码业务链工具，共 35 个；公网 Streamable HTTP 8890 仍只注册 16 个 Look 工具。关系否决和恢复仅保存在本机，不提供远程策略 API。
+GXP 低代码只读诊断 MCP。服务不会执行数据库写入、画布保存或发布。Windows/macOS/Linux 本地 stdio 包含 16 个 Look 工具、5 个 CPM 快照工具、7 个开发库 Schema/可信关系工具、7 个本地源码业务链工具和 3 个本地业务关系图工具，共 38 个；公网 Streamable HTTP 8890 仍只注册 16 个 Look 工具。关系否决和恢复以及业务关系图仅保存在本机，不提供远程策略 API。
 
 ## 一键安装与快速上手
 
@@ -29,8 +29,20 @@ python scripts/install_claude.py --verify-only
 - 自动设置模块路径并发现测试，不需要 `pytest` 或手工设置 `PYTHONPATH`。无匹配测试、导入错误或断言失败均返回非零退出码。测试数量、耗时以实际输出为准。
 - 默认跳过真实数据库测试，即使外部设置了 `GXP_LIVE_TEST=1`；只有显式传入 `--live` 才启用在线只读检查。
 - Claude 安装默认验证 MCP，`--verify` 显式启用，`--no-verify` 跳过；`--verify-only` 只验证，不安装、不改配置。`--verify-timeout 15` 设置协议交互超时，另预留最多 15 秒清理子进程。
-- 自检通过实际 `scripts/start_mcp.mjs` 启动服务，执行 `initialize`、`ping`、`tools/list`，要求 35 个不重名工具；失败返回非零退出码。这不代表 35 个工具的业务功能或数据库连接均可用，自检不调用业务工具。
+- 自检通过实际 `scripts/start_mcp.mjs` 启动服务，执行 `initialize`、`ping`、`tools/list`，要求 38 个不重名工具；失败返回非零退出码。这不代表 38 个工具的业务功能或数据库连接均可用，自检不调用业务工具。
 - Windows 使用目录联接，Linux/macOS 使用目录软链接。相同链接重复安装保持不变；仅替换已有链接，遇到真实文件或目录会报错并保留内容，请先手工确认并迁移冲突目录。
+
+## 本地业务关系图与自动复用
+
+排查开始时，技能先检索本机已确认的“业务结论 + 证据链”；最终结论达到确认门槛后自动保存。关系图只作历史线索，每次复用必须重新核对当前动作、发布设计、控制流和只读证据，必要时核对运行证据。
+
+- `search_business_logic_graph(...)`：按关键词、动作、页面、表/视图、字段、确认状态或失效状态检索，返回节点、边、证据摘要和 Mermaid；已知当前发布设计或证据变化时自动标记旧关系 stale。
+- `upsert_business_logic_graph(relation)`：只保存已确认诊断元数据；稳定 relation_id 和证据指纹实现幂等，变更生成新修订并保留旧修订和审计。
+- `invalidate_business_logic_graph(relation_id, reason)`：用户确认错误或证据失效后标记失效，保留历史。
+
+文件位于 Windows `%LOCALAPPDATA%/GxpLowcodeReadonly/business-logic-graph.json`；macOS/Linux 沿用系统数据目录。首次访问自动迁移该位置的旧格式，仅导入满足当前证据与敏感信息校验的已确认记录，记录跳过/拒绝数量。缓存不可用时继续正常只读排查。禁止持久化凭据、连接信息、业务记录值、完整参数和完整生成 C#，不向 HTTP 暴露这三个工具。
+
+字段、限制和迁移格式见 [业务关系图契约](docs/business-logic-graph-contract.md)。本功能由更新后的技能自动调用本地工具完成，不在每次中间工具调用时写入。
 
 ## CPM 本地快照定位
 
@@ -202,4 +214,4 @@ LoadCredential=db-password:/etc/gxp-lowcode-readonly/db-password
 2. 数据库白名单/ACL 允许服务主机 `43.135.137.212` 使用专用只读账号连接。
 3. CPM 页面 Network 中请求直达 `43.135.137.212:8890/mcp`，完成 Session、CORS 和至少一次真实只读工具调用。
 
-历史服务器验收曾列出 11 个工具；当前本地 stdio 定义为 35 个工具，HTTP MCP 入口固定为 16 个 Look 工具。关系否决记录、开发库 Schema 快照和源码索引均留在本地，HTTP 服务不再注册关系策略 API。
+历史服务器验收曾列出 11 个工具；当前本地 stdio 定义为 38 个工具，HTTP MCP 入口固定为 16 个 Look 工具。关系否决记录、开发库 Schema 快照、源码索引和业务关系图均留在本地，HTTP 服务不再注册本地缓存工具。

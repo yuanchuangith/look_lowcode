@@ -49,6 +49,63 @@ def connection_status() -> dict[str, Any]:
     return GxpReadonlyService.connection_status()
 
 
+def search_business_logic_graph(
+    query: str | None = None,
+    action: str | None = None,
+    page: str | None = None,
+    table: str | None = None,
+    field: str | None = None,
+    status: str | None = None,
+    environment: str = "development",
+    limit: int = 20,
+    relation_id: str | None = None,
+    current_published_designs: dict[str, str] | None = None,
+    current_evidence_fingerprints: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Search local historical conclusions, evidence, nodes/edges and Mermaid.
+
+    Always reverify the current published copy. Defaults to active development
+    relations. status can select a confirmation level or stale/superseded/invalidated.
+    current_published_designs maps RefId to the observed current design ID;
+    current_evidence_fingerprints maps evidence ID to SHA-256 (requires relation_id).
+    Differences mark old local revisions stale; this performs no database reads.
+    """
+    return GxpReadonlyService.search_business_logic_graph(
+        query=query, action=action, page=page, table=table, field=field,
+        status=status, environment=environment, limit=limit,
+        relation_id=relation_id, current_published_designs=current_published_designs,
+        current_evidence_fingerprints=current_evidence_fingerprints,
+    )
+
+
+def upsert_business_logic_graph(relation: dict[str, Any]) -> dict[str, Any]:
+    """Persist a confirmed metadata-only conclusion locally; never writes business data.
+
+    relation fields: relation_key, environment, conclusion, business_keywords, status,
+    anchors, published_design_id, tables, views, fields, nodes, edges, evidence.
+    Optional calls lists symbolic calls. relation_id and evidence_fingerprint are
+    computed; if supplied they must match. Each anchor has id/action_code/ref_id/page/
+    group_key/node_key/canvas_row/published_design_id; each evidence entry has id/type/
+    fingerprint (SHA-256)/summary/anchor_ids. Edges have source/target/kind/label/evidence_ids.
+    Only confirmed_static/confirmed_data/runtime_verified are accepted after current
+    evidence checks. Never send credentials, records, complete parameters or C#.
+    See the Skill reference business-logic-graph.md for fields and confirmation gates.
+    """
+    return GxpReadonlyService.upsert_business_logic_graph(relation)
+
+
+def invalidate_business_logic_graph(
+    relation_id: str,
+    reason: str = "evidence_invalidated",
+) -> dict[str, Any]:
+    """Keep audit history and invalidate a local relation.
+
+    reason: user_confirmed_incorrect, published_design_changed or evidence_invalidated.
+    Only call after explicit user correction or confirmed evidence/publication change.
+    """
+    return GxpReadonlyService.invalidate_business_logic_graph(relation_id, reason=reason)
+
+
 def resolve_action(identifier: str) -> dict[str, Any]:
     """Resolve an exact action code/RefId, falling back to an action-name search."""
     return service().resolve_action(identifier)
@@ -382,12 +439,19 @@ LOCAL_SOURCE_TOOLS = (
     trace_component_filter_contract,
 )
 
+LOCAL_GRAPH_TOOLS = (
+    search_business_logic_graph,
+    upsert_business_logic_graph,
+    invalidate_business_logic_graph,
+)
+
 
 def create_mcp(
     *,
     include_local_cpm: bool = True,
     include_local_schema: bool = True,
     include_local_source: bool = True,
+    include_local_graph: bool = True,
     **settings: Any,
 ) -> FastMCP:
     """Create one transport-specific MCP instance over the shared read-only tools."""
@@ -412,6 +476,9 @@ def create_mcp(
             app.tool()(tool)
     if include_local_source:
         for tool in LOCAL_SOURCE_TOOLS:
+            app.tool()(tool)
+    if include_local_graph:
+        for tool in LOCAL_GRAPH_TOOLS:
             app.tool()(tool)
     return app
 

@@ -12,6 +12,7 @@ from .canvas_references import select_groups
 from .canvas_budget import canvas_payload, node_value_page, response_limit
 from .canvas_evidence import scoped_csharp
 from .call_flow import expand_calls
+from .business_logic_graph import BusinessLogicGraphStore, BusinessLogicGraphError
 
 
 class GxpReadonlyService:
@@ -20,6 +21,63 @@ class GxpReadonlyService:
         self.repository = GxpRepository(self.database)
         self.inspector = CanvasInspector()
         self.diagnostics = DiagnosticEngine(self.repository, self.inspector)
+
+    @staticmethod
+    def _graph_unavailable(exc: Exception) -> dict[str, Any]:
+        return {
+            "available": False,
+            "cache_error": str(exc) if isinstance(exc, (BusinessLogicGraphError, ValueError)) else "GRAPH_IO_ERROR",
+            "results": [],
+            "relations": [],
+            "count": 0,
+            "must_reverify_current_published_copy": True,
+            "next_step": "Continue the normal read-only diagnosis; the local relation cache is unavailable.",
+        }
+
+    @staticmethod
+    def search_business_logic_graph(
+        query: str | None = None,
+        action: str | None = None,
+        page: str | None = None,
+        table: str | None = None,
+        field: str | None = None,
+        status: str | None = None,
+        environment: str = "development",
+        limit: int = 20,
+        relation_id: str | None = None,
+        current_published_designs: dict[str, str] | None = None,
+        current_evidence_fingerprints: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        try:
+            result = BusinessLogicGraphStore().search(
+                query=query, action=action, page=page, table=table,
+                field=field, status=status, environment=environment, limit=limit,
+                relation_id=relation_id,
+                current_published_designs=current_published_designs,
+                current_evidence_fingerprints=current_evidence_fingerprints,
+            )
+            result["available"] = True
+            return result
+        except (BusinessLogicGraphError, ValueError, OSError) as exc:
+            return GxpReadonlyService._graph_unavailable(exc)
+
+    @staticmethod
+    def upsert_business_logic_graph(relation: dict[str, Any]) -> dict[str, Any]:
+        try:
+            result = BusinessLogicGraphStore().upsert(relation)
+            return {"available": True, **result}
+        except (BusinessLogicGraphError, ValueError, OSError) as exc:
+            return {**GxpReadonlyService._graph_unavailable(exc), "written": False}
+
+    @staticmethod
+    def invalidate_business_logic_graph(
+        relation_id: str,
+        reason: str = "evidence_invalidated",
+    ) -> dict[str, Any]:
+        try:
+            return {"available": True, **BusinessLogicGraphStore().invalidate(relation_id, reason=reason)}
+        except (BusinessLogicGraphError, ValueError, OSError) as exc:
+            return {**GxpReadonlyService._graph_unavailable(exc), "changed": 0}
 
     @classmethod
     def connection_status(cls) -> dict[str, Any]:

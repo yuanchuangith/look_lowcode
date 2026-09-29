@@ -1,0 +1,160 @@
+{
+  "relation_key": "training-close-date-source",
+  "environment": "development",
+  "conclusion": "关闭或取消动作写入 close_date，统计视图与报表读取该结束日期",
+  "business_keywords": [
+    "岗位培训",
+    "取消",
+    "关闭",
+    "结束日期"
+  ],
+  "status": "confirmed_data",
+  "published_design_id": "published-training-design-1",
+  "anchors": [
+    {
+      "id": "training-close-action",
+      "action_code": "training.close",
+      "ref_id": "training-ref-1",
+      "page": "TrainingPage",
+      "group_key": "CloseTraining",
+      "node_key": "WriteCloseDate",
+      "canvas_row": 12,
+      "published_design_id": "published-training-design-1"
+    }
+  ],
+  "tables": [
+    "training_task"
+  ],
+  "views": [
+    "training_statistics"
+  ],
+  "fields": [
+    "status",
+    "close_date"
+  ],
+  "calls": ["training.close -> training_statistics"],
+  "nodes": [
+    {
+      "id": "action",
+      "kind": "action",
+      "label": "岗位培训取消/关闭",
+      "anchor_id": "training-close-action"
+    },
+    {
+      "id": "task-status",
+      "kind": "field",
+      "label": "写入任务状态",
+      "anchor_id": "training-close-action",
+      "table": "training_task",
+      "field": "status"
+    },
+    {
+      "id": "task-close-date",
+      "kind": "field",
+      "label": "写入 close_date",
+      "anchor_id": "training-close-action",
+      "table": "training_task",
+      "field": "close_date"
+    },
+    {
+      "id": "statistics",
+      "kind": "view",
+      "label": "培训统计视图读取结束日期",
+      "anchor_id": "training-close-action",
+      "view": "training_statistics"
+    },
+    {
+      "id": "report",
+      "kind": "report",
+      "label": "Training statistics report",
+      "anchor_id": "training-close-action"
+    }
+  ],
+  "edges": [
+    {
+      "source": "action",
+      "target": "task-status",
+      "kind": "writes",
+      "label": "写入任务状态",
+      "evidence_ids": [
+        "design",
+        "flow",
+        "schema",
+        "data"
+      ]
+    },
+    {
+      "source": "task-status",
+      "target": "task-close-date",
+      "kind": "flows_to",
+      "label": "关闭后写入 close_date",
+      "evidence_ids": [
+        "design",
+        "flow",
+        "schema",
+        "data"
+      ]
+    },
+    {
+      "source": "task-close-date",
+      "target": "statistics",
+      "kind": "reads",
+      "label": "统计读取结束日期",
+      "evidence_ids": [
+        "design",
+        "flow",
+        "schema",
+        "data"
+      ]
+    },
+    {
+      "source": "statistics",
+      "target": "report",
+      "kind": "displays",
+      "label": "Display end date",
+      "evidence_ids": [
+        "design",
+        "schema",
+        "data"
+      ]
+    }
+  ],
+  "evidence": [
+    {
+      "id": "design",
+      "type": "published_design",
+      "fingerprint": "3c21f1b41c774338113ad4752d017964f29dd481ae153de6072a1ab48b6db9ca",
+      "summary": "当前发布动作身份和设计副本已核对",
+      "anchor_ids": [
+        "training-close-action"
+      ]
+    },
+    {
+      "id": "flow",
+      "type": "control_flow",
+      "fingerprint": "6776e81f30732b4e070f98b4d9d5c1f70b2305d0ba4f6b4533bd8b461922a209",
+      "summary": "关闭/取消分支和写入节点已核对",
+      "anchor_ids": [
+        "training-close-action"
+      ]
+    },
+    {
+      "id": "schema",
+      "type": "schema",
+      "fingerprint": "12463d16c9bcf686689c2b11f21af5eedcd1581eb72ce81a45b002cf78851b6b",
+      "summary": "任务表字段与统计视图字段已核对",
+      "anchor_ids": [
+        "training-close-action"
+      ]
+    },
+    {
+      "id": "data",
+      "type": "readonly_data",
+      "fingerprint": "0291efc091a59e5cb51fa4ac1202f9072689273a9b122f2ae54ab7acbbcc4d1e",
+      "summary": "只读聚合证据确认结束日期来源",
+      "anchor_ids": [
+        "training-close-action"
+      ]
+    }
+  ]
+}

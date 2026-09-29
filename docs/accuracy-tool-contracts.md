@@ -1,6 +1,6 @@
 # Accuracy tool extensions
 
-All changes are read-only. Existing tool names and the 35-local/16-HTTP registration split remain unchanged. New inputs are optional. Remote deployment is not part of this update.
+All changes are read-only. The current registration split is 38 local stdio tools and 16 HTTP tools; the three business-logic graph tools are local only. New inputs are optional. Remote deployment is not part of this update.
 
 ## Conversation routing
 

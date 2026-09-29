@@ -9,6 +9,21 @@ SKILL_ROOT = PLUGIN_ROOT / "skills" / "gxp-lowcode-debug"
 
 
 class SkillContractTests(unittest.TestCase):
+    def test_business_graph_requires_current_evidence_and_confirmed_only_persistence(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        reference = SKILL_ROOT / "references" / "business-logic-graph.md"
+        self.assertTrue(reference.is_file())
+        self.assertIn("references/business-logic-graph.md", skill)
+        for term in ("search_business_logic_graph", "upsert_business_logic_graph",
+                     "invalidate_business_logic_graph", "只保存已确认关系",
+                     "当前发布副本始终是本次运行配置的权威",
+                     "继续正常只读排查", "凭据", "业务记录值", "完整参数", "完整生成 C#"):
+            self.assertIn(term, skill)
+        content = reference.read_text(encoding="utf-8")
+        for term in ("confirmed_static", "confirmed_data", "runtime_verified",
+                     "evidence_fingerprint", "relation_id", "Mermaid"):
+            self.assertIn(term, content)
+
     def test_dropdown_routing_and_polarity_gate_are_present(self) -> None:
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         for term in (

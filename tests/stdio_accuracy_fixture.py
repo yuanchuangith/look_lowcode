@@ -37,5 +37,5 @@ service.inspector = CanvasInspector()
 service.diagnostics = DiagnosticEngine(service.repository, service.inspector)
 server.service = lambda: service
 local = len(sys.argv) < 3 or sys.argv[2] != "http-registry"
-app = server.create_mcp(include_local_cpm=local, include_local_schema=local, include_local_source=local)
+app = server.create_mcp(include_local_cpm=local, include_local_schema=local, include_local_source=local, include_local_graph=local)
 app.run(transport="stdio")

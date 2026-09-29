@@ -1,5 +1,15 @@
 # Progress
 
+## 2026-09-29 — Business logic graph
+- Read the supplied UTF-8 implementation plan and repository instructions.
+- Read the planning-with-files skill and restored existing planning context.
+- Confirmed current MCP registry split (16 core, 19 local groups) and reusable locked JSON implementation.
+- Completed graph storage and 3 static service/MCP methods, local-only registration, Skill routing/reference, 5-node/4-edge sanitized training fixture, docs and version 0.4.0. Updated verification tooling from 35 to 38 local tools; CPM CLI remains 0.3.1.
+- All 25 graph tests pass, including concurrent writes, atomic replacement failure, lock timeout, corruption, migration failure, sensitive payload rejection, evidence gates, bounded search, environment isolation and revision invalidation.
+- Full regression completed: 259 tests in 12.993s; 253 passed, 3 live tests skipped, 3 pre-existing environment errors. Unmodified HEAD d7bbae5 reproduces all 3 in test_environment.py. The first sandbox run additionally failed at old runtime lock files; approved escalated run resolved those permissions failures.
+- Protocol verification: actual Node launcher initialize/ping/list succeeds with 38 tools; fixture sessions show 38 local / 16 HTTP-registry tools and six calls per session. Graph upsert/repeat/search/invalidate protocol sequence passes with temporary cache and no database configuration.
+- Skill validator and git diff --check pass. No installation/reinstallation, remote deployment, credential configuration or business-database calls performed.
+
 ## Accuracy implementation 2026-09-06
 - Completed repository-installer-only update to 0.3.1+codex.local-20260906-021126, enabled. All60 installed core/Skill/script source hashes match. cpm0.3.1/status pass; existing snapshot stale/TTL1800/one historical failure remains without refresh. Fresh installed35/16 fixture sessions and actual Node launcher discovery/catalog pass. Durable baseline and all three replay evidence rounds hash-verified under F:/Desktop/git/look_lowcode-backups. Final implementation results include limitations and installer-only rollback steps; no remote service or business data changed.
 - Both stage gates passed against final source: 195 tests (192 passed/3 live skips),22 new-focused tests; final frozen-Skill replay candidate12/12, baseline seven heading failures. Final actual UTF-8 synthetic benchmarks and fresh MCP fixtures passed. Results and limitations recorded in docs/accuracy-implementation-results-2026-09-06.md. Durable 373-file baseline hash-verified at F:/Desktop/git/look_lowcode-backups/accuracy-20260906. Proceeding to repository-installer-only local update.

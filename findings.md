@@ -1,5 +1,15 @@
 # Findings
 
+## Business logic graph plan 2026-09-29
+- Final implementation reuses _PolicyFileLock and cpm_config._atomic_json; new graph methods are static and do not construct the database. Confirmed status and lifecycle are separate; stale/superseded/invalidated revisions retain confirmation metadata and audit.
+- There is no existing business-logic-graph.json at this computer's standard runtime path. Migration was validated with synthetic legacy wrappers, including candidate/sensitive rejection and failed replacement preserving original bytes.
+- Final full suite: 259 total, 253 pass, 3 live skips, 3 baseline environment errors. An isolated archive of unmodified HEAD d7bbae5 reproduces the same three failures.
+- Actual Node launcher initialize/ping/tools-list returns 38. Fresh fixture MCP sessions return 38 local / 16 HTTP-registry tools and pass six calls each; six new graph protocol calls pass with missing database configuration and temporary-only cache.
+- The repository already has a locked, atomically replaced JSON pattern in `mcp/gxp_core/relation_policy.py`; it stores under the schema runtime root (`%LOCALAPPDATA%/GxpLowcodeReadonly` on Windows), which matches the requested graph location.
+- `mcp/server.py` currently exposes 16 core HTTP tools plus 5 CPM, 7 Schema and 7 source local tools (35 stdio tools). `mcp/http_server.py` explicitly disables all three local groups, so graph tools must be added as a fourth local group and disabled there.
+- `service.py` is the shared business façade; graph methods should be cache-only and independent of the database constructor so cache failures can degrade to read-only diagnosis.
+- The plan requires strict persistence boundaries: only confirmed statuses, opaque metadata/anchors/evidence fingerprints, no credentials, records, complete parameters or complete generated C#.
+
 ## Accuracy implementation accepted 2026-09-06
 - Final results: docs/accuracy-implementation-results-2026-09-06.md. Implemented session-only intent contract, precise references/groups/calls, bounded field flow, method-local C# evidence, UTF-8 paging and allow-listed knowledge catalog; verified through195 regression cases (three live skips),12 same-model fixed-evidence cases and fresh installed MCP sessions.
 - The paired replay primarily measures reporting improvement: both versions make12 correct business decisions, but the baseline mislabels seven normal results as problem1. No generalized intent-accuracy percentage is claimed. New static analysis adds small-result CPU cost; oversized results are explicitly reduced within budget.
