@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-09-26T00:00:00+00:00",
+  "relations": [
+    {
+      "schema_version": 1,
+      "relation_id": "legacy-training-close",
+      "status": "confirmed_static",
+      "summary": "关闭培训动作写入结束日期，统计视图和报表读取结束日期",
+      "anchors": {
+        "page": {"route": "TrainingPage", "display_name": "岗位培训任务管理"},
+        "action": {"code": "training.close", "ref_id": "training-ref-1", "display_name": "关闭培训"},
+        "group": {"key": "training-group", "display_name": "取消或关闭岗位培训"}
+      },
+      "nodes": [
+        {"id": "close-task", "kind": "node", "canvas_line": 54, "node_key": "close-node", "display_name": "更新培训任务"},
+        {"id": "training-task", "kind": "table", "name": "training_task"}
+      ],
+      "edges": [
+        {"from": "close-task", "to": "training-task", "relation": "updates", "fields": ["status", "close_date"]}
+      ],
+      "evidence": [
+        {"layer": "lowcode", "design_id": "training-design-1", "version": "published", "node_key": "close-node", "structure_status": "valid"}
+      ],
+      "reusable_when": ["同一动作和同一发布设计仍存在"],
+      "invalid_when": ["发布设计或节点映射变化"],
+      "updated_at": "2026-09-26T00:00:00+00:00"
+    }
+  ]
+}

@@ -22,7 +22,8 @@ REASON_CODES = {"user_confirmed_incorrect", "published_design_changed", "evidenc
 HASH_RE = re.compile(r"^[a-f0-9]{64}$")
 # Text is a short human-written summary, never a tool response, source or record.
 UNSAFE_TEXT = re.compile(
-    r"(?i)(?:password|passwd|pwd|token|secret|connectionstring|server|host|user id|uid)"
+    r"(?i)\b(?:select\s+.+?\s+from|insert\s+into|update\s+\w+\s+set|delete\s+from)\b|"
+    r"(?:password|passwd|pwd|token|secret|connectionstring|server|host|user id|uid)"
     r"\s*[=:]|bearer\s+\S+|://|-----BEGIN|\b(?:namespace|using)\s+[\w.]+[;{]"
     r"|\b(?:public|private|protected)\s+(?:static\s+)?\w+\s+\w+\s*[({]"
     r"|\b(?:return|var)\s+[^;]+;|[{}]|(?:密码|令牌|连接串|记录值)\s*[:：=]"
@@ -219,10 +220,39 @@ def _empty_document() -> dict:
             "migration": {"attempted": False, "imported": 0, "skipped": 0, "rejected": 0}}
 
 
+def _legacy_relation(record: dict) -> dict:
+    if "schema_version" not in record:
+        return record
+    if type(record["schema_version"]) is not int or record["schema_version"] != 1:
+        raise GraphValidationError("GRAPH_UNSUPPORTED_LEGACY_RECORD")
+    relation = dict(record)
+    relation.pop("schema_version")
+    legacy_id = relation.pop("relation_id", None)
+    if legacy_id is not None:
+        _text(legacy_id)
+    for key in ("updated_at", "previous_revision"):
+        if key in relation:
+            _text(relation.pop(key))
+    for key in ("reusable_when", "invalid_when"):
+        if key in relation:
+            _strings(relation.pop(key), 50)
+    if "summary" in relation:
+        summary = _text(relation.pop("summary"), 1000)
+        if "conclusion" in relation and relation["conclusion"] != summary:
+            raise GraphValidationError("GRAPH_CONFLICTING_LEGACY_CONCLUSION")
+        relation["conclusion"] = summary
+    if "relation_key" not in relation and legacy_id is not None:
+        relation["relation_key"] = "legacy-" + legacy_id
+    if "business_keywords" not in relation and "conclusion" in relation:
+        relation["business_keywords"] = [relation["conclusion"]]
+    return relation
+
+
 class BusinessLogicGraphStore:
     def __init__(self, path: Path | None = None, *, lock_timeout_seconds: float = 5):
         self.path = (path or default_graph_path()).resolve()
         self.lock_path = self.path.with_name(self.path.name + ".lock")
+        self.legacy_path = self.path.with_name(self.path.stem + ".legacy-v1.json")
         self.lock_timeout_seconds = lock_timeout_seconds
 
     def _write(self, document: dict) -> None:
@@ -261,10 +291,13 @@ class BusinessLogicGraphStore:
         self._audit(document, "upsert", new)
         return {"written": True, "idempotent": False, "relation": copy.deepcopy(new)}
 
-    def _migrate(self, legacy: Any) -> dict:
+    def _migrate(self, legacy: Any, original: bytes) -> dict:
         if isinstance(legacy, list):
             records = legacy
         elif isinstance(legacy, dict) and legacy.get("version") in (None, 0, 1):
+            if "schema_version" in legacy and (
+                    type(legacy["schema_version"]) is not int or legacy["schema_version"] != 1):
+                raise BusinessLogicGraphError("GRAPH_UNSUPPORTED_VERSION")
             records = legacy.get("relations", legacy.get("records"))
         else:
             raise BusinessLogicGraphError("GRAPH_UNSUPPORTED_VERSION")
@@ -273,6 +306,7 @@ class BusinessLogicGraphStore:
         document = _empty_document()
         migration = document["migration"]
         migration["attempted"] = True
+        migration["legacy_archive"] = self.legacy_path.name
         for item in records:
             if (not isinstance(item, dict) or not isinstance(item.get("status"), str)
                     or item["status"] not in CONFIRMED_STATUSES):
@@ -280,12 +314,23 @@ class BusinessLogicGraphStore:
                 continue
             try:
                 # Legacy record must meet today's evidence/sensitive-data gates.
-                relation = validate_relation(item)
+                relation = validate_relation(_legacy_relation(item))
             except (GraphValidationError, TypeError):
                 migration["rejected"] += 1
                 continue
             migration["imported"] += int(self._upsert(document, relation)["written"])
-        self._write(document)  # atomic; failed migration leaves the original untouched
+        if self.legacy_path.exists():
+            with self.legacy_path.open("rb") as stream:
+                if stream.read(MAX_GRAPH_BYTES + 1) != original:
+                    raise BusinessLogicGraphError("GRAPH_MIGRATION_ARCHIVE_CONFLICT")
+        elif self.path.exists():
+            self.path.rename(self.legacy_path)
+        try:
+            self._write(document)
+        except (BusinessLogicGraphError, OSError):
+            if not self.path.exists() and self.legacy_path.exists():
+                self.legacy_path.rename(self.path)
+            raise
         return document
 
     def _read(self) -> dict:
@@ -293,7 +338,11 @@ class BusinessLogicGraphStore:
             with self.path.open("rb") as stream:
                 data = stream.read(MAX_GRAPH_BYTES + 1)
         except FileNotFoundError:
-            return _empty_document()
+            try:
+                with self.legacy_path.open("rb") as stream:
+                    data = stream.read(MAX_GRAPH_BYTES + 1)
+            except FileNotFoundError:
+                return _empty_document()
         if len(data) > MAX_GRAPH_BYTES:
             raise BusinessLogicGraphError("GRAPH_TOO_LARGE")
         try:
@@ -301,18 +350,20 @@ class BusinessLogicGraphStore:
         except (ValueError, UnicodeError, RecursionError) as exc:
             raise BusinessLogicGraphError("GRAPH_CORRUPT") from exc
         if not isinstance(document, dict) or document.get("version") != GRAPH_VERSION:
-            return self._migrate(document)
+            return self._migrate(document, data)
         # Validate every saved record before returning anything from disk.
         try:
             _object(document, {"version", "relations", "audit", "migration"},
                     {"version", "relations", "audit", "migration"})
             _list(document["audit"], 100000)
-            _object(document["migration"], {"attempted", "imported", "skipped", "rejected"},
+            _object(document["migration"], {"attempted", "imported", "skipped", "rejected", "legacy_archive"},
                     {"attempted", "imported", "skipped", "rejected"})
             migration = document["migration"]
             if (type(migration["attempted"]) is not bool
                     or any(type(migration[k]) is not int or migration[k] < 0
                            for k in ("imported", "skipped", "rejected"))):
+                raise GraphValidationError("GRAPH_INVALID_MIGRATION")
+            if "legacy_archive" in migration and migration["legacy_archive"] != self.legacy_path.name:
                 raise GraphValidationError("GRAPH_INVALID_MIGRATION")
             seen: set[tuple[str, int]] = set()
             active: set[str] = set()
@@ -453,6 +504,7 @@ class BusinessLogicGraphStore:
                       "must_reverify_current_published_copy": True,
                       "reverification": "必须重新核对当前发布副本、动作身份、控制流及当前只读证据；历史图不能直接作为本次结论。",
                       "migration": document["migration"], "matched_count": len(matches),
+                      "legacy_review_required": document["migration"]["rejected"] > 0,
                       "relations": [], "count": 0, "truncated": False}
             for record in matches[:limit]:
                 result["relations"].append(record)

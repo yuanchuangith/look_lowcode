@@ -12,7 +12,8 @@ from .canvas_references import select_groups
 from .canvas_budget import canvas_payload, node_value_page, response_limit
 from .canvas_evidence import scoped_csharp
 from .call_flow import expand_calls
-from .business_logic_graph import BusinessLogicGraphStore, BusinessLogicGraphError
+from .business_logic_graph import BusinessLogicGraphError, GraphValidationError
+from .business_graph_store import BusinessGraphStore as BusinessLogicGraphStore
 
 
 class GxpReadonlyService:
@@ -26,7 +27,7 @@ class GxpReadonlyService:
     def _graph_unavailable(exc: Exception) -> dict[str, Any]:
         return {
             "available": False,
-            "cache_error": str(exc) if isinstance(exc, (BusinessLogicGraphError, ValueError)) else "GRAPH_IO_ERROR",
+            "cache_error": str(exc) if isinstance(exc, (BusinessLogicGraphError, GraphValidationError)) else "GRAPH_IO_ERROR",
             "results": [],
             "relations": [],
             "count": 0,
@@ -58,7 +59,7 @@ class GxpReadonlyService:
             )
             result["available"] = True
             return result
-        except (BusinessLogicGraphError, ValueError, OSError) as exc:
+        except (BusinessLogicGraphError, ValueError, OSError, TypeError) as exc:
             return GxpReadonlyService._graph_unavailable(exc)
 
     @staticmethod
@@ -66,7 +67,7 @@ class GxpReadonlyService:
         try:
             result = BusinessLogicGraphStore().upsert(relation)
             return {"available": True, **result}
-        except (BusinessLogicGraphError, ValueError, OSError) as exc:
+        except (BusinessLogicGraphError, ValueError, OSError, TypeError) as exc:
             return {**GxpReadonlyService._graph_unavailable(exc), "written": False}
 
     @staticmethod
@@ -76,8 +77,29 @@ class GxpReadonlyService:
     ) -> dict[str, Any]:
         try:
             return {"available": True, **BusinessLogicGraphStore().invalidate(relation_id, reason=reason)}
-        except (BusinessLogicGraphError, ValueError, OSError) as exc:
+        except (BusinessLogicGraphError, ValueError, OSError, TypeError) as exc:
             return {**GxpReadonlyService._graph_unavailable(exc), "changed": 0}
+
+    @staticmethod
+    def get_business_graph(**options) -> dict[str, Any]:
+        try:
+            return BusinessLogicGraphStore().get_graph(**options)
+        except (BusinessLogicGraphError, ValueError, OSError, TypeError) as exc:
+            return GxpReadonlyService._graph_unavailable(exc)
+
+    @staticmethod
+    def trace_business_data_flow(**options) -> dict[str, Any]:
+        try:
+            return BusinessLogicGraphStore().trace(**options)
+        except (BusinessLogicGraphError, ValueError, OSError, TypeError) as exc:
+            return GxpReadonlyService._graph_unavailable(exc)
+
+    @staticmethod
+    def analyze_business_graph(**options) -> dict[str, Any]:
+        try:
+            return BusinessLogicGraphStore().analyze(**options)
+        except (BusinessLogicGraphError, ValueError, OSError, TypeError) as exc:
+            return GxpReadonlyService._graph_unavailable(exc)
 
     @classmethod
     def connection_status(cls) -> dict[str, Any]:

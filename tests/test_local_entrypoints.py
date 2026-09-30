@@ -225,7 +225,7 @@ class ClaudeVerificationTests(unittest.TestCase):
             self.assertEqual("[SUCCESS]" in output.getvalue(), expected == 0)
 
     def test_verifier_subprocess_contract_and_failures(self) -> None:
-        good = json.dumps({"tools": 38, "initialize": True, "ping": True})
+        good = json.dumps({"tools": 41, "initialize": True, "ping": True})
         outcomes = [(SimpleNamespace(stdout=good), True), (SimpleNamespace(stdout="{}"), False),
                     (SimpleNamespace(stdout="not-json"), False), (subprocess.TimeoutExpired("verify", 20), False),
                     (subprocess.CalledProcessError(1, "verify", stderr="failed"), False)]

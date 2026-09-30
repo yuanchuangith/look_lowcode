@@ -1,22 +1,22 @@
 {
   "name": "gxp-lowcode-readonly",
-  "version": "0.4.0",
-  "description": "Read-only GXP diagnostics with a local confirmed business-logic graph, control-flow reconstruction, source business-chain indexing, Schema snapshots, data-verified relationships, CPM discovery, history-aware exception tracing, and guarded SQL.",
+  "version": "0.5.0",
+  "description": "Read-only GXP diagnostics with a local SQLite global business network, evidence-backed data lineage, bounded catalog expansion, control-flow reconstruction, source tracing and guarded SQL.",
   "author": {
     "name": "Local developer"
   },
   "skills": "./skills/",
   "interface": {
-    "displayName": "GXP \u4f4e\u4ee3\u7801\u53ea\u8bfb\u6392\u67e5",
-    "shortDescription": "\u7cbe\u786e\u5b9a\u4f4d\u52a8\u4f5c\u526f\u672c\u3001\u753b\u5e03\u8282\u70b9\u3001\u5b57\u6bb5\u3001\u751f\u6210 C# \u548c\u5386\u53f2\u5f02\u5e38\u3002",
-    "longDescription": "\u901a\u8fc7\u7ed3\u6784\u5316 MCP \u5de5\u5177\u548c\u53d7\u63a7\u53ea\u8bfb SQL \u6392\u67e5 GXP \u516c\u5171\u52a8\u4f5c\u3001\u8868\u5355\u52a8\u4f5c\u548c\u52a8\u6001\u5f02\u5e38\uff1b\u4f7f\u7528\u672c\u5730\u5df2\u786e\u8ba4\u4e1a\u52a1\u5173\u7cfb\u56fe\u51cf\u5c11\u91cd\u590d\u5b9a\u4f4d\uff1b\u660e\u786e\u8349\u7a3f\u662f\u53ef\u7f16\u8f91\u526f\u672c\u3001\u53d1\u5e03\u662f\u8fd0\u884c\u526f\u672c\uff0c\u5e76\u8f93\u51fa\u52a8\u4f5c\u8eab\u4efd\u3001\u753b\u5e03\u884c/\u7d22\u5f15\u3001\u8282\u70b9 Key\u3001\u5b57\u6bb5\u8bc1\u636e\u3001\u751f\u6210 C# \u5750\u6807\u4e0e\u5386\u53f2\u53d1\u5e03\u5feb\u7167\u3002",
+    "displayName": "GXP 低代码只读排查",
+    "shortDescription": "精确定位动作副本、画布节点、字段、生成 C# 和历史异常。",
+    "longDescription": "通过结构化 MCP 工具和受控只读 SQL 排查 GXP 公共动作、表单动作和动态异常；使用本地已确认业务关系图减少重复定位；明确草稿是可编辑副本、发布是运行副本，并输出动作身份、画布行/索引、节点 Key、字段证据、生成 C# 坐标与历史发布快照。",
     "developerName": "Local developer",
     "category": "Productivity",
     "capabilities": [
       "Skills",
       "MCP"
     ],
-    "defaultPrompt": "\u4f7f\u7528 $gxp-lowcode-debug \u53ea\u8bfb\u6392\u67e5\u95ee\u9898\uff0c\u5148\u786e\u8ba4\u540c\u4e00\u52a8\u4f5c\u7684\u8349\u7a3f/\u53d1\u5e03\u526f\u672c\u548c\u8fd0\u884c\u526f\u672c\uff0c\u518d\u8f93\u51fa\u52a8\u4f5c\u8eab\u4efd\u3001\u7cbe\u786e\u753b\u5e03\u8282\u70b9\u3001\u5b57\u6bb5\u6620\u5c04\u3001\u751f\u6210 C# \u884c\u3001\u53ea\u8bfb\u8bc1\u636e\u548c\u753b\u5e03\u4fee\u6539\u65b9\u6848\u3002"
+    "defaultPrompt": "使用 $gxp-lowcode-debug 只读排查问题，先确认同一动作的草稿/发布副本和运行副本，再输出动作身份、精确画布节点、字段映射、生成 C# 行、只读证据和画布修改方案。"
   },
   "mcpServers": "./.mcp.json"
 }

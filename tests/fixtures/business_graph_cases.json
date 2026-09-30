@@ -1,0 +1,266 @@
+[
+  {
+    "format_version": 3,
+    "scope_id": "fixture",
+    "environment": "development",
+    "case_key": "case-0",
+    "conclusion": "Sanitized confirmed field mapping",
+    "status": "confirmed_static",
+    "entities": [
+      {
+        "id": "A",
+        "kind": "field",
+        "label": "A",
+        "key": {
+          "datasource": "fixture",
+          "schema": "verified",
+          "owner_kind": "table",
+          "owner": "SyntheticObject",
+          "column": "A"
+        }
+      },
+      {
+        "id": "B",
+        "kind": "field",
+        "label": "B",
+        "key": {
+          "datasource": "fixture",
+          "schema": "verified",
+          "owner_kind": "table",
+          "owner": "SyntheticObject",
+          "column": "B"
+        }
+      }
+    ],
+    "facts": [
+      {
+        "id": "flow",
+        "source": "A",
+        "target": "B",
+        "kind": "flows_to",
+        "label": "confirmed field copy",
+        "granularity": "field_level",
+        "mapping": {
+          "kind": "copy",
+          "fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "evidence_ids": [
+          "code",
+          "schema"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "id": "code",
+        "type": "source_static",
+        "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "summary": "Source-static verified mapping",
+        "dependencies": [
+          {
+            "kind": "source",
+            "key": "fixture-backend",
+            "version": "source-v1"
+          }
+        ],
+        "anchors": [
+          {
+            "repository": "backend",
+            "file": "SyntheticMapping.cs",
+            "symbol": "Map",
+            "line": 1
+          }
+        ]
+      },
+      {
+        "id": "schema",
+        "type": "schema",
+        "fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "summary": "Exact verified Schema identities",
+        "dependencies": [
+          {
+            "kind": "schema",
+            "key": "fixture-schema",
+            "version": "schema-v1"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "format_version": 3,
+    "scope_id": "fixture",
+    "environment": "development",
+    "case_key": "case-1",
+    "conclusion": "Sanitized confirmed field mapping",
+    "status": "confirmed_static",
+    "entities": [
+      {
+        "id": "B",
+        "kind": "field",
+        "label": "B",
+        "key": {
+          "datasource": "fixture",
+          "schema": "verified",
+          "owner_kind": "table",
+          "owner": "SyntheticObject",
+          "column": "B"
+        }
+      },
+      {
+        "id": "C",
+        "kind": "field",
+        "label": "C",
+        "key": {
+          "datasource": "fixture",
+          "schema": "verified",
+          "owner_kind": "table",
+          "owner": "SyntheticObject",
+          "column": "C"
+        }
+      }
+    ],
+    "facts": [
+      {
+        "id": "flow",
+        "source": "B",
+        "target": "C",
+        "kind": "flows_to",
+        "label": "confirmed field copy",
+        "granularity": "field_level",
+        "mapping": {
+          "kind": "copy",
+          "fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "evidence_ids": [
+          "code",
+          "schema"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "id": "code",
+        "type": "source_static",
+        "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "summary": "Source-static verified mapping",
+        "dependencies": [
+          {
+            "kind": "source",
+            "key": "fixture-backend",
+            "version": "source-v1"
+          }
+        ],
+        "anchors": [
+          {
+            "repository": "backend",
+            "file": "SyntheticMapping.cs",
+            "symbol": "Map",
+            "line": 2
+          }
+        ]
+      },
+      {
+        "id": "schema",
+        "type": "schema",
+        "fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "summary": "Exact verified Schema identities",
+        "dependencies": [
+          {
+            "kind": "schema",
+            "key": "fixture-schema",
+            "version": "schema-v1"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "format_version": 3,
+    "scope_id": "fixture",
+    "environment": "development",
+    "case_key": "case-2",
+    "conclusion": "Sanitized confirmed field mapping",
+    "status": "confirmed_static",
+    "entities": [
+      {
+        "id": "C",
+        "kind": "field",
+        "label": "C",
+        "key": {
+          "datasource": "fixture",
+          "schema": "verified",
+          "owner_kind": "table",
+          "owner": "SyntheticObject",
+          "column": "C"
+        }
+      },
+      {
+        "id": "D",
+        "kind": "field",
+        "label": "D",
+        "key": {
+          "datasource": "fixture",
+          "schema": "verified",
+          "owner_kind": "table",
+          "owner": "SyntheticObject",
+          "column": "D"
+        }
+      }
+    ],
+    "facts": [
+      {
+        "id": "flow",
+        "source": "C",
+        "target": "D",
+        "kind": "flows_to",
+        "label": "confirmed field copy",
+        "granularity": "field_level",
+        "mapping": {
+          "kind": "copy",
+          "fingerprint": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        "evidence_ids": [
+          "code",
+          "schema"
+        ]
+      }
+    ],
+    "evidence": [
+      {
+        "id": "code",
+        "type": "source_static",
+        "fingerprint": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "summary": "Source-static verified mapping",
+        "dependencies": [
+          {
+            "kind": "source",
+            "key": "fixture-backend",
+            "version": "source-v1"
+          }
+        ],
+        "anchors": [
+          {
+            "repository": "backend",
+            "file": "SyntheticMapping.cs",
+            "symbol": "Map",
+            "line": 3
+          }
+        ]
+      },
+      {
+        "id": "schema",
+        "type": "schema",
+        "fingerprint": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "summary": "Exact verified Schema identities",
+        "dependencies": [
+          {
+            "kind": "schema",
+            "key": "fixture-schema",
+            "version": "schema-v1"
+          }
+        ]
+      }
+    ]
+  }
+]

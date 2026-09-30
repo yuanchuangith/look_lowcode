@@ -22,6 +22,9 @@ from server import (
     search_business_logic_graph,
     upsert_business_logic_graph,
     invalidate_business_logic_graph,
+    get_business_graph,
+    trace_business_data_flow,
+    analyze_business_graph,
 )
 
 
@@ -49,13 +52,13 @@ class ServerToolRegistrationTests(unittest.TestCase):
         self.assertFalse(signature.parameters["include_generated_csharp"].default)
         self.assertEqual(20, signature.parameters["max_nodes"].default)
 
-    def test_local_stdio_has_38_tools_and_http_factory_has_16(self) -> None:
+    def test_local_stdio_has_41_tools_and_http_factory_has_16(self) -> None:
         self.assertEqual(16, len(MCP_TOOLS))
         self.assertEqual(5, len(LOCAL_CPM_TOOLS))
         self.assertEqual(7, len(LOCAL_SCHEMA_TOOLS))
         self.assertEqual(7, len(LOCAL_SOURCE_TOOLS))
-        self.assertEqual(3, len(LOCAL_GRAPH_TOOLS))
-        self.assertEqual(38, len(create_mcp()._tool_manager._tools))
+        self.assertEqual(6, len(LOCAL_GRAPH_TOOLS))
+        self.assertEqual(41, len(create_mcp()._tool_manager._tools))
         self.assertEqual(
             16,
             len(create_mcp(include_local_cpm=False, include_local_schema=False, include_local_source=False, include_local_graph=False)._tool_manager._tools),
@@ -64,7 +67,8 @@ class ServerToolRegistrationTests(unittest.TestCase):
     def test_business_graph_tools_are_local_only(self) -> None:
         names = {tool.__name__ for tool in LOCAL_GRAPH_TOOLS}
         self.assertEqual(
-            {"search_business_logic_graph", "upsert_business_logic_graph", "invalidate_business_logic_graph"},
+            {"search_business_logic_graph", "upsert_business_logic_graph", "invalidate_business_logic_graph",
+             "get_business_graph", "trace_business_data_flow", "analyze_business_graph"},
             names,
         )
         http_names = {tool.name for tool in asyncio.run(create_mcp(include_local_cpm=False, include_local_schema=False, include_local_source=False, include_local_graph=False).list_tools())}
@@ -83,10 +87,16 @@ class ServerToolRegistrationTests(unittest.TestCase):
             self.assertEqual(1, result["changed"])
             self.assertEqual(0, search_business_logic_graph()["count"])
             self.assertEqual(1, search_business_logic_graph(status="invalidated")["count"])
-            Path(directory, "business-logic-graph.json").write_text("broken", encoding="utf-8")
+            self.assertTrue(get_business_graph(include_catalog=True)["available"])
+            self.assertTrue(analyze_business_graph()["available"])
+            self.assertTrue(trace_business_data_flow(start="a" * 64)["available"])
+            Path(directory, "business-graph.sqlite3").write_bytes(b"broken")
             self.assertFalse(search_business_logic_graph()["available"])
             self.assertFalse(upsert_business_logic_graph(fixture)["written"])
             self.assertFalse(invalidate_business_logic_graph(saved["relation"]["relation_id"])["available"])
+            self.assertFalse(get_business_graph()["available"])
+            self.assertFalse(analyze_business_graph()["available"])
+            self.assertFalse(trace_business_data_flow(start="a" * 64)["available"])
 
     def test_http_entrypoint_explicitly_excludes_graph_registration(self):
         from http_server import create_http_app

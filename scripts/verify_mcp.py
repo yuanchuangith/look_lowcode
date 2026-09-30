@@ -8,7 +8,7 @@ import shutil
 import sys
 from pathlib import Path
 
-EXPECTED_TOOL_COUNT = 38
+EXPECTED_TOOL_COUNT = 41
 
 
 async def check_session(session, expected_count: int) -> list[str]:

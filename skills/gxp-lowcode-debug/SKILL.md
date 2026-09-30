@@ -11,11 +11,15 @@ description: Use this skill when the user asks to 排查或复核 GXP 低代码�
 
 ## 本地业务关系图路由
 
-- 开始排查时，锁定用户现象后，先调用 `search_business_logic_graph`，按已知动作、页面、表、字段或问题关键词检索；只传诊断词和元数据，不传原始业务记录。首次调用不要求已知发布设计。
-- 关系图只能作为历史诊断线索。命中后必须重新核对当前动作身份、当前发布设计、当前控制流、Schema 或只读业务证据，必要时补运行证据；当前发布副本始终是本次运行配置的权威。取得最新设计 ID/证据指纹后，传 `current_published_designs` / `current_evidence_fingerprints` 复查；不把旧结论直接当作本次确认。
-- 最终结论达到确认门槛后，自动调用 `upsert_business_logic_graph`，只保存已确认关系的结论和证据链。写入前读取 [references/business-logic-graph.md](references/business-logic-graph.md) 的字段和证据门禁。中间候选、未确认推断和工具失败不写入永久关系；禁止保存凭据、业务记录值、完整参数和完整生成 C#。
-- 用户明确指出关系错误，或已确认发布设计变化、证据失效时，调用 `invalidate_business_logic_graph`；普通质疑或查询失败不作失效依据。失效保留审计，不删除历史。
-- 本地工具缺失或缓存损坏、锁超时、迁移失败时继续正常只读排查，不把缓存错误误报成业务问题。图只在本机保存诊断元数据，不调用 `gxp-lowcode-editor`，不写业务库、动作设计、草稿或发布状态。
+- 开始排查时，锁定用户现象后，先用 `search_business_logic_graph` 检索历史案例，用 `get_business_graph` 查询已知实体或关键词的邻域。案例不是图的边界：本次确认的公共实体应复用已有稳定 ID，不把案例小图互相拼接。
+- 关系图只能作为历史诊断线索。必须核对当前动作身份、发布设计、控制流和必要只读证据；当前发布副本始终是本次运行配置的权威。取得当前 RefId→设计 ID 后用 `current_published_designs` 复查。新发现的 Schema／源码版本通过当前确认的 v3 证据依赖提交，不能因问题文字重标证据环境。
+- 最终确认后自动调用 `upsert_business_logic_graph`，只保存已确认关系。新案例优先用 `format_version=3` 贡献实体、事实与完整支持集合；写入前读取 [references/business-logic-graph.md](references/business-logic-graph.md)。缺稳定身份的项保留待消歧，不靠名称猜合并。只保存定位、结构、抽象结论与证据指纹，禁止凭据、业务记录值、完整参数和完整生成 C#。
+- 同一事实可有多个独立案例支持。用户确认错误或已经确认版本／证据变化时调用 `invalidate_business_logic_graph`；普通质疑、工具失败不撤销。撤销一个案例不能撤销其他有效支持，历史保留。
+- 融合后用 `analyze_business_graph` 检查连接、循环和缺口；字段上下游或起终点路径用 `trace_business_data_flow`。结构归属和未绑定调用不是数据流转；表级证据只能标 dataset_level，静态可达不是实际执行。孤立实体、合法输入／输出和业务独立均可能正常，不以全图连通为目标。
+- 每次用户请求生成一个非敏感 UUID 作为 `request_id`，所有图查询／分析复用同一个值。仅围绕当前已确认实体开启目录补查；最多 3 次额外取证调用、扩展 1 跳、30 秒，不递归、不自动读业务行、不全量刷新。优先已有 CPM、Schema、源码；目录缺失、过期或来源不明时保留待取证任务，精确当前发布证据仍走正常只读排查。有界补查失败不影响已确认事实和问题报告。
+- `legacy_review_required=true` 或 `pending_review` 表示旧记录／身份仍需复核。SQLite 导入不改动旧 JSON 与 .legacy-v1.json，不补造环境、Schema、稳定 ID 或指纹。零命中不等于旧记录丢失，归档不得整体重新提交。
+- 图结果含图版本、统一 ID、逐边支持、Mermaid、截断与继续查询前沿；响应截断不能作为孤岛证据。覆盖率只针对声明 scope、已知目录与快照版本，不宣称未知全平台已经完整。
+- 缓存损坏、锁超时、迁移失败或工具缺失时继续正常只读排查，不静默双写旧 JSON，不把图缓存错误当业务问题，不调用 gxp-lowcode-editor，不写业务库、平台设计、草稿或发布状态。
 
 ## CPM 快照路由
 

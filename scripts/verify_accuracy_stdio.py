@@ -18,7 +18,7 @@ async def verify(root: str, mode: str) -> dict:
         async with ClientSession(read, write) as session:
             await session.initialize()
             tools = await session.list_tools()
-            assert len(tools.tools) == (16 if mode == "http-registry" else 38)
+            assert len(tools.tools) == (16 if mode == "http-registry" else 41)
             schemas = {tool.name: tool.inputSchema for tool in tools.tools}
             assert "context" in schemas["diagnose_codex_input"]["properties"]
             assert "follow_calls" in schemas["inspect_control_flow"]["properties"]
@@ -55,7 +55,7 @@ async def verify_launcher(root: str) -> dict:
         async with ClientSession(read, write) as session:
             await session.initialize()
             tools = await session.list_tools()
-            assert len(tools.tools) == 38
+            assert len(tools.tools) == 41
             schemas = {tool.name: tool.inputSchema for tool in tools.tools}
             assert "context" in schemas["diagnose_codex_input"]["properties"]
             assert "follow_calls" in schemas["inspect_control_flow"]["properties"]

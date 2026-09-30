@@ -111,6 +111,88 @@ class BusinessLogicGraphTests(unittest.TestCase):
         self.assertEqual(1, result["migration"]["skipped"])
         self.assertEqual(1, len(result["relations"]))
 
+    def test_legacy_script_metadata_and_summary_are_normalized(self):
+        legacy_record = dict(self.fixture, schema_version=1,
+                             relation_id="old-script-fingerprint", updated_at="2026-09-26T00:00:00+00:00",
+                             previous_revision="2026-09-25T00:00:00+00:00",
+                             reusable_when=["Same published design"], invalid_when=["Design changes"])
+        legacy_record["summary"] = legacy_record.pop("conclusion")
+        legacy_record.pop("relation_key")
+        legacy_record.pop("business_keywords")
+        original = json.dumps({"schema_version": 1, "relations": [legacy_record]}).encode()
+        self.path.write_bytes(original)
+        result = self.store.search()
+        self.assertEqual(1, result["migration"]["imported"])
+        self.assertEqual(0, result["migration"]["rejected"])
+        self.assertEqual(self.fixture["conclusion"], result["relations"][0]["conclusion"])
+        self.assertEqual("legacy-old-script-fingerprint", result["relations"][0]["relation_key"])
+        self.assertEqual(original, self.store.legacy_path.read_bytes())
+        before = self.path.read_bytes()
+        self.assertEqual(result["migration"], self.store.search()["migration"])
+        self.assertEqual(before, self.path.read_bytes())
+
+    def test_real_legacy_shape_is_archived_without_inventing_evidence(self):
+        original = (ROOT / "fixtures" / "business_logic_graph_legacy_training.json").read_bytes()
+        self.path.write_bytes(original)
+        result = self.store.search()
+        self.assertTrue(result["available"])
+        self.assertEqual(0, result["count"])
+        self.assertEqual(1, result["migration"]["rejected"])
+        self.assertTrue(result["legacy_review_required"])
+        self.assertEqual(self.store.legacy_path.name, result["migration"]["legacy_archive"])
+        self.assertEqual(original, self.store.legacy_path.read_bytes())
+        self.store.upsert(self.fixture)
+        self.assertEqual(1, self.store.search()["count"])
+        self.assertEqual(original, self.store.legacy_path.read_bytes())
+
+    def test_interrupted_migration_recovers_from_original_archive(self):
+        original = json.dumps({"schema_version": 1, "relations": [self.fixture]}).encode()
+        self.store.legacy_path.write_bytes(original)
+        result = self.store.search()
+        self.assertEqual(1, result["count"])
+        self.assertEqual(original, self.store.legacy_path.read_bytes())
+        self.assertTrue(self.path.is_file())
+
+    def test_migration_never_overwrites_a_different_legacy_archive(self):
+        original = json.dumps({"version": 1, "relations": [self.fixture]}).encode()
+        self.path.write_bytes(original)
+        self.store.legacy_path.write_bytes(b"different original archive")
+        with self.assertRaisesRegex(BusinessLogicGraphError, "GRAPH_MIGRATION_ARCHIVE_CONFLICT"):
+            self.store.read()
+        self.assertEqual(original, self.path.read_bytes())
+        self.assertEqual(b"different original archive", self.store.legacy_path.read_bytes())
+
+    def test_archive_failure_preserves_original_and_degrades_without_leaking_errors(self):
+        original = json.dumps({"version": 1, "relations": [self.fixture]}).encode()
+        self.path.write_bytes(original)
+        with patch("pathlib.Path.rename", side_effect=PermissionError("PRIVATE_IO_MESSAGE")):
+            with patch("gxp_core.service.BusinessLogicGraphStore", return_value=self.store):
+                result = GxpReadonlyService.search_business_logic_graph()
+        self.assertFalse(result["available"])
+        self.assertEqual("GRAPH_IO_ERROR", result["cache_error"])
+        self.assertNotIn("PRIVATE_IO_MESSAGE", json.dumps(result))
+        self.assertEqual(original, self.path.read_bytes())
+        self.assertFalse(self.store.legacy_path.exists())
+
+    def test_unknown_legacy_schema_version_is_not_overwritten(self):
+        original = json.dumps({"schema_version": 99, "relations": [self.fixture]}).encode()
+        self.path.write_bytes(original)
+        with self.assertRaisesRegex(BusinessLogicGraphError, "GRAPH_UNSUPPORTED_VERSION"):
+            self.store.read()
+        self.assertEqual(original, self.path.read_bytes())
+        self.assertFalse(self.store.legacy_path.exists())
+
+    def test_legacy_conversion_does_not_bypass_sensitive_or_evidence_gates(self):
+        records = [dict(self.fixture, schema_version=1, password="PRIVATE_FIXTURE_VALUE"),
+                   dict(self.fixture, schema_version=1, evidence=[]),
+                   dict(self.fixture, schema_version=99),
+                   dict(self.fixture, schema_version=1, summary="Different conclusion")]
+        self.path.write_text(json.dumps({"schema_version": 1, "relations": records}), encoding="utf-8")
+        result = self.store.search()
+        self.assertEqual(4, result["migration"]["rejected"])
+        self.assertEqual(0, result["count"])
+        self.assertNotIn("PRIVATE_FIXTURE_VALUE", self.path.read_text(encoding="utf-8"))
+
     def test_atomic_replace_failure_keeps_previous_file_and_cleans_temporary(self):
         self.store.upsert(self.fixture)
         before = self.path.read_bytes()
@@ -283,7 +365,8 @@ class BusinessLogicGraphTests(unittest.TestCase):
         insufficient = dict(self.fixture, evidence=[])
         self.path.write_text(json.dumps([self.fixture, self.fixture, unsafe, insufficient, {"status": "candidate"}]), encoding="utf-8")
         result = self.store.search()
-        self.assertEqual({"attempted": True, "imported": 1, "skipped": 1, "rejected": 2}, result["migration"])
+        self.assertEqual({"attempted": True, "imported": 1, "skipped": 1, "rejected": 2,
+                          "legacy_archive": self.store.legacy_path.name}, result["migration"])
         self.assertNotIn("PRIVATE_FIXTURE_VALUE", self.path.read_text(encoding="utf-8"))
         before = self.path.read_bytes()
         self.store.search()

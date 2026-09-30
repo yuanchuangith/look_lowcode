@@ -81,6 +81,13 @@ def search_business_logic_graph(
 def upsert_business_logic_graph(relation: dict[str, Any]) -> dict[str, Any]:
     """Persist a confirmed metadata-only conclusion locally; never writes business data.
 
+    V3: format_version=3, case_key, conclusion, status, entities, facts, evidence;
+    optional scope_id, environment (development by default), request_id.
+    Entities have id/kind/key/label and explicit stable typed identity. Facts reference
+    entity/evidence IDs with normalized conditions/mappings. Evidence has fingerprints,
+    complete action/Schema/source dependencies and optional precise anchors.
+    Delta reports new/reused/updated/pending-review counts; cases fuse by entity IDs.
+    The following v2 input remains supported without guessing missing global identity.
     relation fields: relation_key, environment, conclusion, business_keywords, status,
     anchors, published_design_id, tables, views, fields, nodes, edges, evidence.
     Optional calls lists symbolic calls. relation_id and evidence_fingerprint are
@@ -104,6 +111,61 @@ def invalidate_business_logic_graph(
     Only call after explicit user correction or confirmed evidence/publication change.
     """
     return GxpReadonlyService.invalidate_business_logic_graph(relation_id, reason=reason)
+
+
+def get_business_graph(
+    entity_ids: list[str] | None = None, query: str | None = None,
+    scope_id: str | None = None, environment: str = "development",
+    projection: str = "business", depth: int = 2, include_catalog: bool = False,
+    request_id: str | None = None, edge_cursor: str | None = None,
+) -> dict[str, Any]:
+    """Query the local global graph; stable IDs, whole support bundles and Mermaid.
+
+    business/data are projections of the same SQLite facts. Depth is 0..5,
+    at most 200 nodes/400 edges/256 KiB; truncation returns a continuation frontier.
+    Supplying a shared request_id enables existing-catalog-only bounded expansion:
+    at most 3 lookups/1 hop/30 seconds per user request, no refresh or business rows.
+    Always reverify current published evidence before reusing a historical fact.
+    edge_cursor continues omitted parallel edges under the same seeds/depth; check
+    graph_revision between pages and restart if it changed.
+    """
+    return GxpReadonlyService.get_business_graph(
+        entity_ids=entity_ids, query=query, scope_id=scope_id, environment=environment,
+        projection=projection, depth=depth, include_catalog=include_catalog, request_id=request_id, edge_cursor=edge_cursor)
+
+
+def trace_business_data_flow(
+    start: str, target: str | None = None, direction: str = "downstream",
+    max_depth: int = 8, max_paths: int = 5, scope_id: str | None = None,
+    environment: str = "development",
+) -> dict[str, Any]:
+    """Trace confirmed directed lineage using canonical entity IDs.
+
+    direction is upstream/downstream; optional target constrains the endpoint.
+    Depth 1..20, max 5 paths. Structural edges and unbound calls never create lineage.
+    Returns edge conditions/mappings/granularity and complete evidence supports.
+    Static reachability does not assert actual execution; current evidence needs review.
+    """
+    return GxpReadonlyService.trace_business_data_flow(
+        start=start, target=target, direction=direction, max_depth=max_depth,
+        max_paths=max_paths, scope_id=scope_id, environment=environment)
+
+
+def analyze_business_graph(
+    scope_id: str | None = None, environment: str = "development",
+    projection: str = "business", include_catalog: bool = True,
+    entity_ids: list[str] | None = None, request_id: str | None = None,
+) -> dict[str, Any]:
+    """Analyze the entire declared scope for components, SCCs, boundaries and gaps.
+
+    entity_ids selects expansion seeds, NOT an incomplete isolation-analysis subgraph.
+    Incomplete budgeted adjacency never reports real islands. Isolated identities are
+    valid; gaps are not bugs. Coverage denominator is only materialized known catalogs.
+    Shared request_id permits bounded existing-catalog lookup, never recursive refresh.
+    """
+    return GxpReadonlyService.analyze_business_graph(
+        scope_id=scope_id, environment=environment, projection=projection,
+        include_catalog=include_catalog, entity_ids=entity_ids, request_id=request_id)
 
 
 def resolve_action(identifier: str) -> dict[str, Any]:
@@ -443,6 +505,9 @@ LOCAL_GRAPH_TOOLS = (
     search_business_logic_graph,
     upsert_business_logic_graph,
     invalidate_business_logic_graph,
+    get_business_graph,
+    trace_business_data_flow,
+    analyze_business_graph,
 )
 
 

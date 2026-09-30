@@ -1,4 +1,4 @@
 interface:
   display_name: "GXP 低代码精确排查"
-  short_description: "只读定位动作、控制流、源码业务链、可信表关系与历史异常"
-  default_prompt: "使用 $gxp-lowcode-debug 锁定当前现象、期望规则和无匹配行为，先检索本地业务关系图，再核对当前动作、发布副本、控制流和只读证据，做紧凑只读检查；只有最终结论确认后才自动保存关系图，缓存只作历史线索，不得调用或转入 gxp-lowcode-edit。"
+  short_description: "只读排查动作与证据，持续融合全局业务关系网和字段数据流转图"
+  default_prompt: "使用 $gxp-lowcode-debug 锁定当前现象、期望规则和无匹配行为，检索历史图并核对当前发布及证据，做紧凑只读检查，将确认的实体与关系融入全局图，用共享预算补查目录和追踪流转；不猜连边，不写业务数据或平台设计，不得调用或转入 gxp-lowcode-edit。"
