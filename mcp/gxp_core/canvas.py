@@ -631,6 +631,7 @@ class ControlFlowAnalyzer:
             }
 
             if opener_family:
+                facts = node_facts(node)
                 root = _node_ref(index, node)
                 block_id = f"block:{group_key or group_index}:{key or index}"
                 block = {
@@ -641,8 +642,8 @@ class ControlFlowAnalyzer:
                         {
                             **root,
                             "role": self._role(element, opener_family),
-                            "condition": (node_facts(node).get("condition") or ""),
-                            "condition_ast": node_facts(node).get("condition_ast"),
+                            "condition": (facts.get("condition") or ""),
+                            "condition_ast": facts.get("condition_ast"),
                             "body_start": index + 1,
                             "body_end": None,
                         }

@@ -63,8 +63,9 @@ def neighborhood(nodes: list[dict], edges: list[dict], seeds: list[str], depth: 
 def components(nodes: list[dict], edges: list[dict]) -> list[list[str]]:
     links = adjacency(nodes, edges, undirected=True)
     remaining, result = set(links), []
-    while remaining:
-        root = min(remaining)
+    for root in links:
+        if root not in remaining:
+            continue
         pending, found = [root], set()
         while pending:
             current = pending.pop()
@@ -74,7 +75,7 @@ def components(nodes: list[dict], edges: list[dict]) -> list[list[str]]:
             pending.extend(neighbor for neighbor, _ in links[current] if neighbor not in found)
         remaining.difference_update(found)
         result.append(sorted(found))
-    return result
+    return sorted(result)
 
 
 def strongly_connected(nodes: list[dict], edges: list[dict]) -> list[list[str]]:

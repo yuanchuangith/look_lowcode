@@ -5,6 +5,7 @@ from functools import lru_cache
 from typing import Any
 
 from .source_backend import parse_backend_file
+from .source_lex import _blank
 
 
 @lru_cache(maxsize=8)
@@ -22,7 +23,7 @@ def scoped_csharp(csharp: str, nodes: list[dict[str, Any]], design_id: str = "")
         return csharp, {"status": "unresolved", "search_scope": "whole_action_candidate", "code_sha256": code_hash, "exact_source_map": False}
     method = candidates[0]
     begin, end = method["body_start"], method["body_end"] + 1
-    masked = "".join(char if begin <= index < end or char in "\r\n" else " " for index, char in enumerate(csharp))
+    masked = _blank(csharp[:begin]) + csharp[begin:end] + _blank(csharp[end:])
     return masked, {
         "status": "resolved_method", "search_scope": "group_method",
         "method": method["member"], "code_sha256": code_hash,

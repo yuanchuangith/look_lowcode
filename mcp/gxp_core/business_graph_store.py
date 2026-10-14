@@ -463,12 +463,7 @@ class BusinessGraphStore:
     def _snapshot(self, connection, scope: str, environment: str, include_catalog: bool) -> dict:
         started = time.monotonic()
         entity_rows = connection.execute("""SELECT entities.*,
-            EXISTS(SELECT 1 FROM sightings WHERE sightings.entity_id=entities.id AND sightings.catalog=0) AS diagnostic,
-            EXISTS(SELECT 1 FROM sightings JOIN observations ON observations.id=sightings.observation_id
-                WHERE sightings.entity_id=entities.id AND sightings.catalog=0 AND observations.lifecycle='active') AS observed,
-            EXISTS(SELECT 1 FROM facts JOIN supports ON supports.fact_id=facts.id
-                WHERE (facts.source=entities.id OR facts.target=entities.id) AND supports.lifecycle='active'
-                AND facts.kind NOT IN ('contains','belongs_to')) AS connected
+            EXISTS(SELECT 1 FROM sightings WHERE sightings.entity_id=entities.id AND sightings.catalog=0) AS diagnostic
             FROM entities WHERE entities.scope=? AND entities.environment=?
             AND (? OR EXISTS(SELECT 1 FROM sightings WHERE sightings.entity_id=entities.id AND sightings.catalog=0)
                  OR EXISTS(SELECT 1 FROM facts WHERE (facts.source=entities.id OR facts.target=entities.id)

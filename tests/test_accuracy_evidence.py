@@ -57,6 +57,26 @@ class AccuracyEvidenceTests(unittest.TestCase):
         self.assertEqual([3], [item["requested_line"] for item in matches])
         self.assertFalse(result["exact_source_map"])
 
+    def test_method_mask_preserves_unicode_positions_and_line_endings(self):
+        for newline in ("\n", "\r\n", "\r"):
+            with self.subTest(newline=newline):
+                code = newline.join(['class Generated {', 'void before() { var text = "培训😀"; }',
+                                     '\tvoid target() { var text = "字段😀"; }',
+                                     'void after() { var text = "结束"; }', '}'])
+                masked, details = scoped_csharp(code, [{"group_key": "target"}])
+                self.assertEqual(details["status"], "resolved_method")
+                methods, incomplete = _method_ranges("", details["code_sha256"], code)
+                self.assertFalse(incomplete)
+                method = next(item for item in methods if item["member"] == "target")
+                begin, end = method["body_start"], method["body_end"] + 1
+                self.assertEqual(len(masked), len(code))
+                self.assertEqual(masked[begin:end], code[begin:end])
+                self.assertEqual([(index, char) for index, char in enumerate(masked) if char in "\r\n"],
+                                 [(index, char) for index, char in enumerate(code) if char in "\r\n"])
+                self.assertTrue(all(char in " \r\n" for char in masked[:begin] + masked[end:]))
+                self.assertEqual(details["start_line"], code.count("\n", 0, begin) + 1)
+                self.assertEqual(details["end_line"], code.count("\n", 0, end) + 1)
+
     def test_ambiguous_or_unknown_method_retains_candidate(self):
         code = 'class Generated { void target(int first) {} void target(string second) {} }'
         self.assertEqual("unresolved", scoped_csharp(code, [{"group_key": "target"}])[1]["status"])
