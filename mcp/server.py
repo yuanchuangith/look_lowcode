@@ -180,12 +180,15 @@ def export_edit_handoff(
     change_spec: dict[str, Any],
     diagnosis_source: dict[str, str],
 ) -> dict[str, Any]:
-    """Export current design evidence locally for a confirmed proposed edit.
+    """Optionally retain current design evidence locally for later use.
 
     identifier must be an exact action code/RefId. Select 1-10 targets with exact
     group_key/node_key. diagnosis_source requires version (draft/published),
     design_id and data_sha256 from the inspected current copy. change_spec accepts
-    user_request, summary, changes, preserve and scenarios; see edit-handoff.md.
+    user_request, summary, changes, preserve, scenarios and optional diagnosis
+    (issues, excluded, unresolved); see edit-handoff.md. Root cause, solution and
+    changes may be absent while evidence is incomplete. The editor can work
+    without a handoff, assess saved evidence and obtain missing facts itself.
     Saves only local design evidence, never business rows, credentials, generated
     JS/C# or authorization. A later editor must verify the current draft.
     """

@@ -96,7 +96,7 @@ def export_handoff(service: Any, identifier: str, targets: list[dict[str, str]],
             "available": True, **result, "source_target_differences": differences,
             "diagnosis_matches_draft": source_evidence["data_sha256"] == draft_evidence["data_sha256"],
             "authorization_granted": False, "write_executed": False,
-            "next_step": "After the user confirms this change scope, pass handoff_ref to begin_edit_session. The editor must verify its current draft; this record grants no session or approval.",
+            "next_step": "Evidence was saved locally. The editor may optionally use handoff_ref or proceed with ordinary inspection. Check relevance and sufficiency first; analyze or call readonly Look tools for missing evidence. This record starts no editor session and grants no approval.",
         }
     except Exception as exc:
         return fallback(exc)

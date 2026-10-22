@@ -13,7 +13,7 @@ from unittest.mock import patch
 from gxp_core.canvas import CanvasInspector
 from gxp_core.handoff_store import (
     HandoffError, HandoffStore, canonical_sha256, compare_targets,
-    environment_scope, snapshot_targets,
+    environment_scope, snapshot_targets, validate_change_spec,
 )
 from gxp_core.service import GxpReadonlyService
 from gxp_core.telemetry import traced_tool
@@ -31,6 +31,38 @@ def design(value="old", parent="parent", *, design_id="draft", version="draft"):
 
 TARGETS = [{"group_key": "main", "node_key": "node"}]
 SPEC = {"user_request": "Fix target and preserve old eval expression", "summary": "Update target value", "changes": [{"group_key": "main", "node_key": "node", "description": "Replace value", "parameter_path": "/inputParams/value", "before": {"code": "old"}, "after": {"code": "new"}}], "preserve": ["eval(requestResult.Data)"], "scenarios": [{"name": "empty", "expected": "Skip"}]}
+
+
+def diagnosed_spec():
+    spec = copy.deepcopy(SPEC)
+    confirmed = {
+        "issue_id": "wrong-value", "status": "confirmed", "symptom": "Target receives the old value",
+        "expected": "Target receives the new value", "root_cause": "The target expression still contains old",
+        "solution": "Replace the target value and preserve the surrounding condition",
+        "evidence": [{"source": "inspect_action", "finding": "Target expression contains old", "group_key": "main", "node_key": "node", "design_id": "published"}],
+        "verification": "static_confirmed",
+    }
+    candidate = copy.deepcopy(confirmed)
+    candidate.update(issue_id="runtime-behavior", status="candidate", root_cause="Runtime effect still needs verification", verification="pending")
+    candidate["evidence"] = [{"source": "inspect_control_flow", "finding": "The target is guarded by the existing condition"}]
+    spec["diagnosis"] = {
+        "issues": [confirmed, candidate], "excluded": ["The selected node identity is unambiguous"],
+        "unresolved": ["Run the expected scenario after publication"],
+    }
+    return spec
+
+
+def evidence_only_spec(*, include_changes=False):
+    spec = diagnosed_spec()
+    spec["summary"] = "Preserve observed target behavior for later analysis"
+    for issue in spec["diagnosis"]["issues"]:
+        for key in ("expected", "root_cause", "solution"):
+            issue.pop(key)
+    if include_changes:
+        spec["changes"] = []
+    else:
+        spec.pop("changes")
+    return spec
 
 
 def make_record():
@@ -61,6 +93,90 @@ class HandoffStoreTests(unittest.TestCase):
             self.assertFalse(list(Path(directory).glob("*.tmp")))
             with self.assertRaises(HandoffError):
                 store.read(first["handoff_id"], "0" * 64)
+
+    def test_legacy_record_without_diagnosis_or_changes_remains_readable(self):
+        record = make_record()
+        record["change_spec"] = {"user_request": "Original request", "summary": "Legacy proposal"}
+        with tempfile.TemporaryDirectory() as directory:
+            store = HandoffStore(Path(directory))
+            saved = store.write(record)
+            restored = store.read(**saved["handoff_ref"])
+        self.assertEqual(1, restored["schema_version"])
+        self.assertEqual(record["change_spec"], restored["change_spec"])
+
+    def test_diagnosis_requires_evidence_fields_valid_enums_and_precise_evidence(self):
+        mutations = []
+        for field in ("issue_id", "status", "symptom", "evidence", "verification"):
+            mutations.append(("missing-" + field, lambda spec, field=field: spec["diagnosis"]["issues"][0].pop(field)))
+        for field in ("expected", "root_cause", "solution"):
+            mutations.append(("empty-" + field, lambda spec, field=field: spec["diagnosis"]["issues"][0].update({field: " "})))
+            mutations.append(("invalid-" + field, lambda spec, field=field: spec["diagnosis"]["issues"][0].update({field: None})))
+        mutations.extend([
+            ("status", lambda spec: spec["diagnosis"]["issues"][0].update(status="verified")),
+            ("verification", lambda spec: spec["diagnosis"]["issues"][0].update(verification="checksum_verified")),
+            ("empty-evidence", lambda spec: spec["diagnosis"]["issues"][0].update(evidence=[])),
+            ("missing-source", lambda spec: spec["diagnosis"]["issues"][0]["evidence"][0].pop("source")),
+            ("missing-finding", lambda spec: spec["diagnosis"]["issues"][0]["evidence"][0].pop("finding")),
+            ("unpaired-group", lambda spec: spec["diagnosis"]["issues"][0]["evidence"][0].pop("node_key")),
+            ("unpaired-node", lambda spec: spec["diagnosis"]["issues"][0]["evidence"][0].pop("group_key")),
+            ("empty-design", lambda spec: spec["diagnosis"]["issues"][0]["evidence"][0].update(design_id="")),
+            ("unknown-field", lambda spec: spec["diagnosis"].update(unknown="unsupported")),
+            ("unknown-issue-field", lambda spec: spec["diagnosis"]["issues"][0].update(unknown="unsupported")),
+            ("empty-excluded", lambda spec: spec["diagnosis"].update(excluded=[""])),
+            ("invalid-unresolved", lambda spec: spec["diagnosis"].update(unresolved=[{}])),
+        ])
+        for name, mutate in mutations:
+            with self.subTest(name=name):
+                spec = diagnosed_spec()
+                mutate(spec)
+                with self.assertRaises(HandoffError) as exc:
+                    validate_change_spec(spec)
+                self.assertEqual("HANDOFF_CHANGE_SPEC", exc.exception.code)
+
+    def test_diagnosis_limits_private_data_and_supplied_changes(self):
+        for name, mutate, code in [
+            ("no-issues", lambda spec: spec["diagnosis"].update(issues=[]), "HANDOFF_CHANGE_SPEC"),
+            ("too-many-issues", lambda spec: spec["diagnosis"].update(issues=[spec["diagnosis"]["issues"][0]] * 21), "HANDOFF_CHANGE_SPEC"),
+            ("too-many-evidence", lambda spec: spec["diagnosis"]["issues"][0].update(evidence=[{"source": "tool", "finding": "observed"}] * 21), "HANDOFF_CHANGE_SPEC"),
+            ("too-many-excluded", lambda spec: spec["diagnosis"].update(excluded=["excluded"] * 51), "HANDOFF_CHANGE_SPEC"),
+            ("too-many-unresolved", lambda spec: spec["diagnosis"].update(unresolved=["pending"] * 51), "HANDOFF_CHANGE_SPEC"),
+            ("long-id", lambda spec: spec["diagnosis"]["issues"][0].update(issue_id="x" * 201), "HANDOFF_LIMIT"),
+            ("long-text", lambda spec: spec["diagnosis"]["issues"][0].update(symptom="中" * 1366), "HANDOFF_LIMIT"),
+            ("private", lambda spec: spec["diagnosis"]["issues"][0]["evidence"][0].update(password="secret"), "HANDOFF_PRIVATE_DATA"),
+            ("missing-group", lambda spec: spec["changes"][0].pop("group_key"), "HANDOFF_CHANGE_SPEC"),
+            ("missing-node", lambda spec: spec["changes"][0].pop("node_key"), "HANDOFF_CHANGE_SPEC"),
+            ("empty-description", lambda spec: spec["changes"][0].update(description=" "), "HANDOFF_CHANGE_SPEC"),
+        ]:
+            with self.subTest(name=name):
+                spec = diagnosed_spec()
+                mutate(spec)
+                with self.assertRaises(HandoffError) as exc:
+                    validate_change_spec(spec)
+                self.assertEqual(code, exc.exception.code)
+        spec = diagnosed_spec()
+        spec["changes"] = [{"group_key": "main", "node_key": "node", "description": "Insert a node after this target"}]
+        spec["diagnosis"]["issues"][0]["verification"] = "runtime_verified"
+        self.assertEqual(spec, validate_change_spec(spec))
+
+    def test_evidence_only_diagnosis_round_trip_without_required_solution_or_changes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = HandoffStore(Path(directory))
+            for include_changes in (False, True):
+                with self.subTest(include_changes=include_changes):
+                    record = make_record()
+                    record["change_spec"] = evidence_only_spec(include_changes=include_changes)
+                    saved = store.write(record)
+                    restored = store.read(**saved["handoff_ref"])
+                    self.assertEqual(record["change_spec"], restored["change_spec"])
+
+    def test_optional_diagnosis_text_still_has_a_four_kib_limit(self):
+        for field in ("expected", "root_cause", "solution"):
+            with self.subTest(field=field):
+                spec = evidence_only_spec()
+                spec["diagnosis"]["issues"][0][field] = "x" * 4097
+                with self.assertRaises(HandoffError) as exc:
+                    validate_change_spec(spec)
+                self.assertEqual("HANDOFF_LIMIT", exc.exception.code)
 
     def test_environment_destination_excludes_account_and_secret(self):
         first = {"host": " LOCALHOST ", "port": "3306", "database": "test", "user": "one", "password": "first"}
@@ -167,6 +283,33 @@ class EditHandoffServiceTests(unittest.TestCase):
         record = HandoffStore().read(**result["handoff_ref"])
         self.assertEqual("old", record["targets"][0]["paramsValue"]["inputParams"]["value"]["code"])
         self.assertNotIn("do not export generated source", json.dumps(record))
+
+    def test_export_and_read_preserve_complete_diagnosis_without_promoting_findings(self):
+        spec = diagnosed_spec()
+        exported = self.service.export_edit_handoff("code", TARGETS, spec, {
+            "version": "published", "design_id": "published", "data_sha256": self.published["data_sha256"],
+        })
+        self.assertTrue(exported["available"])
+        restored = GxpReadonlyService.read_edit_handoff(**exported["handoff_ref"])
+        self.assertTrue(restored["response_complete"])
+        self.assertEqual(spec, restored["record"]["change_spec"])
+        issues = restored["record"]["change_spec"]["diagnosis"]["issues"]
+        self.assertEqual(["confirmed", "candidate"], [issue["status"] for issue in issues])
+        self.assertEqual(["static_confirmed", "pending"], [issue["verification"] for issue in issues])
+        self.assertFalse(restored["authorization_granted"])
+
+    def test_export_and_read_evidence_only_diagnosis_with_no_or_empty_changes(self):
+        for include_changes in (False, True):
+            with self.subTest(include_changes=include_changes):
+                spec = evidence_only_spec(include_changes=include_changes)
+                exported = self.service.export_edit_handoff("code", TARGETS, spec, {
+                    "version": "published", "design_id": "published", "data_sha256": self.published["data_sha256"],
+                })
+                self.assertTrue(exported["available"])
+                restored = GxpReadonlyService.read_edit_handoff(**exported["handoff_ref"])
+                self.assertTrue(restored["response_complete"])
+                self.assertEqual(spec, restored["record"]["change_spec"])
+                self.assertFalse(restored["authorization_granted"])
 
     def test_cross_dialogue_read_is_database_free_and_requires_explicit_scope(self):
         first, second = self.export(), self.export()

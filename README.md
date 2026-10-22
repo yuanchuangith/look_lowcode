@@ -6,6 +6,8 @@ GXP 低代码只读诊断 MCP。服务不会执行数据库写入、画布保存
 
 `export_edit_handoff(identifier, targets, change_spec, diagnosis_source)` 集中核对当前草稿和刚刚诊断的当前副本，保存 1–10 个精确节点的设计证据；`read_edit_handoff(handoff_id="", identifier="", sha256="", target_index=null)` 在同机新对话明确选择和读取。编辑端通过可选 `handoff_ref` 核对复用；交接不授予编辑权限，不继承旧会话／审批。参数和边界见 [edit-handoff.md](skills/gxp-lowcode-debug/references/edit-handoff.md)。
 
+Look 留下问题现象、证据和已有的原因、修复建议，可通过 `change_spec.diagnosis` 保存本机节点留证；尚无根因或方案时也可保存。记录与 `handoff_ref` 均为可选，不强制交接。Write 正常使用时先检查已有相关材料，证据足够则复用，不足时自行分析或调用 Look 补证；编译、人工审批和保存后核对照常执行。旧交接包仍可读取。
+
 每次 MCP 响应外层返回 `trace_id`、`total_elapsed_ms`、`timings`；数据库读取和交接分段计时，失败也保留耗时。不记录参数、代码或凭据到性能日志，不把计时放入业务指纹。源码更新不触发安装、升级、Codex 重启或业务保存。
 
 ## 一键安装与快速上手
