@@ -162,8 +162,10 @@ class ReadOnlySession:
             raise DatabaseExecutionError("Read-only session is not active")
         capped_rows = max(1, min(int(max_rows), 500))
         try:
-            self.cursor.execute(sql, params)
-            rows = list(self.cursor.fetchmany(capped_rows + 1))
+            from .telemetry import stage
+            with stage("database.read", count=capped_rows):
+                self.cursor.execute(sql, params)
+                rows = list(self.cursor.fetchmany(capped_rows + 1))
         except Exception as exc:
             raise DatabaseExecutionError(str(exc)) from exc
         truncated = len(rows) > capped_rows

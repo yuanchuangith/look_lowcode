@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from copy import deepcopy
 from datetime import date, datetime
 from typing import Any
 
@@ -73,6 +74,21 @@ class GxpRepository:
         self.database = database
         self._column_cache: dict[str, dict[str, str]] = {}
         self._action_cache: dict[str, list[dict[str, Any]]] = {}
+        # One repository is created per MCP request. This is an identity index,
+        # not a cross-request snapshot or an alias-resolution shortcut.
+        self._metadata_cache: dict[str, dict[str, Any]] = {}
+
+    def _remember_metadata(self, results: list[dict[str, Any]]) -> None:
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for item in results:
+            if item.get("ref_id"):
+                grouped.setdefault(str(item["ref_id"]), []).append(item)
+        for ref_id, matches in grouped.items():
+            if len(matches) == 1:
+                self._metadata_cache[ref_id] = deepcopy(matches[0])
+                self._metadata_cache[ref_id].pop("matched_by", None)
+            else:
+                self._metadata_cache.pop(ref_id, None)
 
     def _columns(self, table: str, session: ReadOnlySession | None = None) -> dict[str, str]:
         table = validate_identifier(table, "table")
@@ -154,6 +170,7 @@ LIMIT {safe_limit}
                     result["form_name"] = self._load_form_name(
                         _text(result.get("page_id")), session
                     )
+        self._remember_metadata(results)
         return results
 
     def resolve_actions(self, identifiers: list[str]) -> list[dict[str, Any]]:
@@ -194,6 +211,7 @@ ORDER BY action_type, ref_id
                 for item in results
                 if value in {str(item.get("ref_id", "")), str(item.get("action_code", ""))}
             ]
+        self._remember_metadata(results)
         return results
 
     def _load_form_name(self, page_id: str, session: ReadOnlySession) -> str:
@@ -386,6 +404,8 @@ LIMIT {safe_limit}
         return results
 
     def action_metadata(self, ref_id: str) -> dict[str, Any]:
+        if ref_id in self._metadata_cache:
+            return deepcopy(self._metadata_cache[ref_id])
         matches = self.resolve_action(ref_id)
         if not matches:
             return {
@@ -396,10 +416,10 @@ LIMIT {safe_limit}
                 "page_id": "",
                 "form_name": "",
             }
-        return matches[0]
+        return deepcopy(matches[0])
 
     def _design_select(
-        self, *, include_content: bool, include_hashes: bool = True
+        self, *, include_content: bool, include_hashes: bool = True, include_csharp: bool = True
     ) -> tuple[str, dict[str, str]]:
         columns = self._columns("cpm_bizflows_design")
         aliases: dict[str, str] = {}
@@ -418,12 +438,20 @@ LIMIT {safe_limit}
         for alias, names in candidates.items():
             if alias in ("data", "csharp_code") and not include_content:
                 continue
+            if alias == "csharp_code" and not include_csharp:
+                continue
             column = self._pick(columns, *names, required=alias in required)
             if column:
                 aliases[alias] = column
                 parts.append(f"`{column}` AS `{alias}`")
             elif alias == "csharp_code" and include_content:
                 parts.append("'' AS `csharp_code`")
+        if include_content and not include_csharp:
+            csharp_column = self._pick(columns, "csharp_code", "csharpCode")
+            expression = f"IFNULL(`{csharp_column}`,'')" if csharp_column else "''"
+            # Match Python's SHA256(text.encode('utf-8')) even if the database
+            # column uses another text character set. No C# content is returned.
+            parts.append(f"SHA2(CONVERT({expression} USING utf8mb4),256) AS `csharp_sha256`")
         if not include_content:
             data_column = self._pick(columns, "data", required=True)
             csharp_column = self._pick(columns, "csharp_code", "csharpCode")
@@ -482,16 +510,17 @@ LIMIT {safe_limit}
         return results
 
     @staticmethod
-    def _design_row(row: dict[str, Any], *, include_content: bool) -> dict[str, Any]:
+    def _design_row(row: dict[str, Any], *, include_content: bool, include_csharp: bool = True) -> dict[str, Any]:
         item = _row_json(row)
         item["version"] = "published" if bool(item.get("is_publish")) else "draft"
         if include_content:
             item["data"] = _text(row.get("data"))
-            item["csharp_code"] = _text(row.get("csharp_code"))
             item["data_sha256"] = hashlib.sha256(item["data"].encode()).hexdigest()
-            item["csharp_sha256"] = hashlib.sha256(
-                item["csharp_code"].encode()
-            ).hexdigest()
+            if include_csharp:
+                item["csharp_code"] = _text(row.get("csharp_code"))
+                item["csharp_sha256"] = hashlib.sha256(item["csharp_code"].encode()).hexdigest()
+            elif not re.fullmatch(r"[0-9a-f]{64}", str(item.get("csharp_sha256", ""))):
+                raise RepositoryError("Design C# content fingerprint was not returned by the database")
         return item
 
     def _load_design_content(
@@ -500,6 +529,7 @@ LIMIT {safe_limit}
         selected: dict[str, Any],
         *,
         include_deleted: bool,
+        include_csharp: bool = True,
     ) -> dict[str, Any]:
         """Load content for one already-selected design row.
 
@@ -507,7 +537,7 @@ LIMIT {safe_limit}
         content query is then keyed by the design id so a large action history
         does not require transferring every design JSON/C# payload.
         """
-        select_list, aliases = self._design_select(include_content=True)
+        select_list, aliases = self._design_select(include_content=True, include_csharp=include_csharp)
         ref_column = aliases["ref_id"]
         id_column = aliases.get("design_id")
         deleted_column = aliases.get("is_deleted")
@@ -530,7 +560,7 @@ LIMIT {safe_limit}
             raise RepositoryError(
                 f"Design payload not found for ref_Id={ref_id}, design_id={selected.get('design_id')}"
             )
-        return self._design_row(rows[0], include_content=True)
+        return self._design_row(rows[0], include_content=True, include_csharp=include_csharp)
 
     def load_design(
         self,
@@ -540,6 +570,7 @@ LIMIT {safe_limit}
         design_id: str | None = None,
         at_time: str | None = None,
         include_deleted: bool = True,
+        include_csharp: bool = True,
     ) -> dict[str, Any]:
         if version not in {"published", "draft"}:
             raise ValueError("version must be published or draft")
@@ -581,6 +612,7 @@ LIMIT {safe_limit}
                 ref_id,
                 item,
                 include_deleted=include_deleted,
+                include_csharp=include_csharp,
             )
         try:
             item["data_json"] = json.loads(item.get("data") or "{}")

@@ -1,6 +1,12 @@
 # gxp-lowcode-readonly
 
-GXP 低代码只读诊断 MCP。服务不会执行数据库写入、画布保存或发布。Windows/macOS/Linux 本地 stdio 包含 16 个 Look 工具、5 个 CPM 快照工具、7 个开发库 Schema/可信关系工具、7 个本地源码业务链工具和 6 个本地业务图谱工具，共 41 个；公网 Streamable HTTP 8890 仍只注册 16 个 Look 工具。关系否决和恢复以及业务关系图仅保存在本机，不提供远程策略 API。
+GXP 低代码只读诊断 MCP。服务不会执行数据库写入、画布保存或发布。Windows/macOS/Linux 本地 stdio 包含 16 个 Look 工具、5 个 CPM 快照工具、7 个开发库 Schema/可信关系工具、7 个本地源码业务链工具、6 个本地业务图谱工具和 2 个本机交接工具，共 43 个；公网 Streamable HTTP 8890 仍只注册 16 个 Look 工具。关系否决和恢复、业务关系图及编辑交接仅保存在本机，不提供远程策略 API。
+
+## 排查与编辑交接、耗时观测
+
+`export_edit_handoff(identifier, targets, change_spec, diagnosis_source)` 集中核对当前草稿和刚刚诊断的当前副本，保存 1–10 个精确节点的设计证据；`read_edit_handoff(handoff_id="", identifier="", sha256="", target_index=null)` 在同机新对话明确选择和读取。编辑端通过可选 `handoff_ref` 核对复用；交接不授予编辑权限，不继承旧会话／审批。参数和边界见 [edit-handoff.md](skills/gxp-lowcode-debug/references/edit-handoff.md)。
+
+每次 MCP 响应外层返回 `trace_id`、`total_elapsed_ms`、`timings`；数据库读取和交接分段计时，失败也保留耗时。不记录参数、代码或凭据到性能日志，不把计时放入业务指纹。源码更新不触发安装、升级、Codex 重启或业务保存。
 
 ## 一键安装与快速上手
 
@@ -29,7 +35,7 @@ python scripts/install_claude.py --verify-only
 - 自动设置模块路径并发现测试，不需要 `pytest` 或手工设置 `PYTHONPATH`。无匹配测试、导入错误或断言失败均返回非零退出码。测试数量、耗时以实际输出为准。
 - 默认跳过真实数据库测试，即使外部设置了 `GXP_LIVE_TEST=1`；只有显式传入 `--live` 才启用在线只读检查。
 - Claude 安装默认验证 MCP，`--verify` 显式启用，`--no-verify` 跳过；`--verify-only` 只验证，不安装、不改配置。`--verify-timeout 15` 设置协议交互超时，另预留最多 15 秒清理子进程。
-- 自检通过实际 `scripts/start_mcp.mjs` 启动服务，执行 `initialize`、`ping`、`tools/list`，要求 41 个不重名工具；失败返回非零退出码。这不代表 41 个工具的业务功能或数据库连接均可用，自检不调用业务工具。
+- 自检通过实际 `scripts/start_mcp.mjs` 启动服务，执行 `initialize`、`ping`、`tools/list`，要求 43 个不重名工具；失败返回非零退出码。这不代表 43 个工具的业务功能或数据库连接均可用，自检不调用业务工具。
 - Windows 使用目录联接，Linux/macOS 使用目录软链接。相同链接重复安装保持不变；仅替换已有链接，遇到真实文件或目录会报错并保留内容，请先手工确认并迁移冲突目录。
 
 ## 本地业务关系网与数据流转图（0.5.0）
@@ -221,4 +227,4 @@ LoadCredential=db-password:/etc/gxp-lowcode-readonly/db-password
 2. 数据库白名单/ACL 允许服务主机 `43.135.137.212` 使用专用只读账号连接。
 3. CPM 页面 Network 中请求直达 `43.135.137.212:8890/mcp`，完成 Session、CORS 和至少一次真实只读工具调用。
 
-历史服务器验收曾列出 11 个工具；当前本地 stdio 定义为 41 个工具，HTTP MCP 入口固定为 16 个 Look 工具。关系否决记录、开发库 Schema 快照、源码索引和业务关系图均留在本地，HTTP 服务不再注册本地缓存工具。
+历史服务器验收曾列出 11 个工具；当前本地 stdio 定义为 43 个工具，HTTP MCP 入口固定为 16 个 Look 工具。关系否决记录、开发库 Schema 快照、源码索引和业务关系图均留在本地，HTTP 服务不再注册本地缓存工具。

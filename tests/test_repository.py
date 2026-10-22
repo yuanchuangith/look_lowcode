@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import unittest
+import hashlib
 from contextlib import contextmanager
 
-from gxp_core.repository import GxpRepository, _page_similarity
+from gxp_core.repository import GxpRepository, RepositoryError, _page_similarity
+from gxp_core.sql_guard import validate_readonly_sql
 
 
 class FormattingSession:
@@ -40,6 +42,77 @@ class QueueDatabase:
 
 
 class RepositoryTests(unittest.TestCase):
+    @staticmethod
+    def design_columns():
+        return {name.lower(): name for name in (
+            "id", "ref_Id", "is_publish", "isDeleted", "lastModificationTime", "creationTime", "data", "csharp_code",
+        )}
+
+    def test_resolved_code_reuses_verified_ref_metadata_when_loading_design(self):
+        action = {"action_type": "public", "ref_id": "ref-1", "action_code": "code-1", "action_name": "verified"}
+        database = QueueDatabase([
+            [action],
+            [{"design_id": "design-1", "is_publish": 1, "is_deleted": 0}],
+            [{"design_id": "design-1", "is_publish": 1, "data": "{}", "csharp_code": "class A {}"}],
+        ])
+        repository = GxpRepository(database)
+        repository._columns = lambda table: self.design_columns()
+        resolved = repository.resolve_action("code-1")
+        resolved[0]["action_name"] = "caller changed result"
+        design = repository.load_design("ref-1")
+        self.assertEqual(len(database.calls), 3)
+        self.assertEqual(design["metadata"]["action_name"], "verified")
+        design["metadata"]["action_name"] = "changed again"
+        self.assertEqual(repository.action_metadata("ref-1")["action_name"], "verified")
+
+    def test_metadata_index_does_not_hide_code_ref_alias_ambiguity(self):
+        target = {"action_type": "public", "ref_id": "ref-1", "action_code": "code-1"}
+        collision = {"action_type": "form", "ref_id": "ref-2", "action_code": "ref-1"}
+        database = QueueDatabase([[target], [target, collision]])
+        repository = GxpRepository(database)
+        repository._load_form_name = lambda page_id, session: ""
+        self.assertEqual(len(repository.resolve_action("code-1")), 1)
+        self.assertEqual(len(repository.resolve_action("ref-1")), 2)
+        self.assertEqual(len(database.calls), 2)
+
+    def test_metadata_cache_does_not_survive_a_new_request_repository(self):
+        original = {"action_type": "public", "ref_id": "ref-1", "action_code": "code-1", "action_name": "before"}
+        changed = {**original, "action_name": "after"}
+        first = GxpRepository(QueueDatabase([[original]]))
+        first.resolve_action("code-1")
+        second = GxpRepository(QueueDatabase([[changed]]))
+        self.assertEqual(first.action_metadata("ref-1")["action_name"], "before")
+        self.assertEqual(second.action_metadata("ref-1")["action_name"], "after")
+
+    def test_canvas_only_load_keeps_full_content_hash_without_transferring_csharp(self):
+        source = '// 中文🙂\r\nclass A { string Name = "test"; }'
+        checksum = hashlib.sha256(source.encode("utf-8")).hexdigest()
+        action = {"action_type": "public", "ref_id": "ref-1", "action_code": "code-1"}
+        version = {"design_id": "design-1", "is_publish": 1, "is_deleted": 0}
+        designs = []
+        for include_csharp in (True, False):
+            row = {**version, "data": '{"canvas": []}'}
+            row.update({"csharp_code": source} if include_csharp else {"csharp_sha256": checksum})
+            database = QueueDatabase([[action], [version], [row]])
+            repository = GxpRepository(database)
+            repository._columns = lambda table: self.design_columns()
+            repository.resolve_action("code-1")
+            design = repository.load_design("ref-1", include_csharp=include_csharp)
+            designs.append(design)
+            sql = database.calls[-1][0]
+            self.assertEqual("`csharp_code` AS `csharp_code`" in sql, include_csharp)
+            if not include_csharp:
+                self.assertIn("SHA2(CONVERT(IFNULL(`csharp_code`,'') USING utf8mb4),256)", sql)
+                self.assertEqual(validate_readonly_sql(sql, "fixture").statement_type, "Select")
+                self.assertNotIn("csharp_code", design)
+            self.assertEqual(design["csharp_sha256"], checksum)
+        self.assertEqual(designs[0]["data_sha256"], designs[1]["data_sha256"])
+        self.assertEqual(designs[0]["data_json"], designs[1]["data_json"])
+
+    def test_canvas_only_load_rejects_missing_fingerprint_instead_of_empty_code_hash(self):
+        with self.assertRaisesRegex(RepositoryError, "fingerprint"):
+            GxpRepository._design_row({"data": "{}"}, include_content=True, include_csharp=False)
+
     def test_get_records_rejects_missing_or_blank_filter_field(self) -> None:
         repository = object.__new__(GxpRepository)
         repository._columns = lambda table: {"id": "id"}

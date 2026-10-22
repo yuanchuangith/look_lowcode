@@ -14,6 +14,7 @@ from .canvas_evidence import scoped_csharp
 from .call_flow import expand_calls
 from .business_logic_graph import BusinessLogicGraphError, GraphValidationError
 from .business_graph_store import BusinessGraphStore as BusinessLogicGraphStore
+from .edit_handoff import export_handoff, read_handoff
 
 
 class GxpReadonlyService:
@@ -22,6 +23,13 @@ class GxpReadonlyService:
         self.repository = GxpRepository(self.database)
         self.inspector = CanvasInspector()
         self.diagnostics = DiagnosticEngine(self.repository, self.inspector)
+
+    def export_edit_handoff(self, identifier: str, targets: list[dict[str, str]], change_spec: dict[str, Any], diagnosis_source: dict[str, str]) -> dict[str, Any]:
+        return export_handoff(self, identifier, targets, change_spec, diagnosis_source)
+
+    @staticmethod
+    def read_edit_handoff(handoff_id: str = "", identifier: str = "", sha256: str = "", *, target_index: int | None = None) -> dict[str, Any]:
+        return read_handoff(handoff_id, identifier, sha256, target_index=target_index)
 
     @staticmethod
     def _graph_unavailable(exc: Exception) -> dict[str, Any]:
@@ -355,6 +363,7 @@ class GxpReadonlyService:
             design_id=design_id,
             at_time=at_time,
             include_deleted=bool(design_id or at_time),
+            include_csharp=bool(include_generated_csharp or csharp_line),
         )
         if value_path is not None:
             if not node_key or not group or value_offset and not design_id:

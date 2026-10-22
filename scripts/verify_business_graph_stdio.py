@@ -35,7 +35,7 @@ async def verify(root: Path) -> dict:
                 await session.initialize()
                 await session.send_ping()
                 tools = await session.list_tools()
-                assert len(tools.tools) == 41
+                assert len(tools.tools) == 43
                 calls = 0
                 async def call(name, arguments):
                     nonlocal calls
@@ -72,7 +72,7 @@ async def verify(root: Path) -> dict:
                 assert legacy_search["count"] == 1
                 legacy_invalidated = await call("invalidate_business_logic_graph", {"relation_id": legacy_saved["relation"]["relation_id"], "reason": "user_confirmed_incorrect"})
                 assert legacy_invalidated["changed"] == 1
-                return {"tools": 41, "graph_protocol_calls": calls, "cross_case_chain": "A-B-C-D",
+                return {"tools": 43, "graph_protocol_calls": calls, "cross_case_chain": "A-B-C-D",
                         "whole_support_bundles": True, "legacy_contract": True, "depth_limit_paths": True,
                         "business_database_access": False, "temporary_cache_only": True}
 

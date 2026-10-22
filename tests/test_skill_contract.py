@@ -9,6 +9,13 @@ SKILL_ROOT = PLUGIN_ROOT / "skills" / "gxp-lowcode-debug"
 
 
 class SkillContractTests(unittest.TestCase):
+    def test_edit_handoff_keeps_explicit_scope_and_local_only_evidence(self):
+        skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("references/edit-handoff.md", skill)
+        reference = (SKILL_ROOT / "references/edit-handoff.md").read_text(encoding="utf-8")
+        for term in ("export_edit_handoff", "read_edit_handoff", "handoff_ref", "diagnosis_source", "不继承", "不是授权", "不要求重启"):
+            self.assertIn(term, skill + reference)
+
     def test_business_graph_requires_current_evidence_and_confirmed_only_persistence(self):
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         reference = SKILL_ROOT / "references" / "business-logic-graph.md"

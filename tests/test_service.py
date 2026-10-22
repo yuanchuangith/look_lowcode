@@ -111,6 +111,7 @@ class ServiceInspectionLimitTests(unittest.TestCase):
                 return []
 
             def load_design(self, ref_id, **kwargs):
+                self.load_options = kwargs
                 return {
                     "design_id": "design-1",
                     "version": "published",
@@ -133,7 +134,8 @@ class ServiceInspectionLimitTests(unittest.TestCase):
         return service
 
     def test_terms_do_not_return_csharp_without_explicit_opt_in(self) -> None:
-        result = self.make_service().inspect_action(
+        service = self.make_service()
+        result = service.inspect_action(
             "PQDL0QlL", terms=["needle"], include_generated_csharp=False
         )
 
@@ -141,9 +143,12 @@ class ServiceInspectionLimitTests(unittest.TestCase):
         self.assertEqual(25, result["matched_node_count"])
         self.assertEqual(20, result["node_count"])
         self.assertTrue(result["nodes_truncated"])
+        self.assertIs(service.repository.load_options["include_csharp"], False)
+        self.assertEqual(result["design"]["csharp_sha256"], "code-hash")
 
     def test_generated_csharp_is_capped_and_reports_truncation(self) -> None:
-        result = self.make_service().inspect_action(
+        service = self.make_service()
+        result = service.inspect_action(
             "PQDL0QlL",
             terms=["needle"],
             include_generated_csharp=True,
@@ -154,13 +159,16 @@ class ServiceInspectionLimitTests(unittest.TestCase):
         self.assertEqual(20, len(result["generated_csharp_matches"]))
         self.assertTrue(result["generated_csharp_matches_truncated"])
         self.assertLess(len(json.dumps(result).encode("utf-8")), 64 * 1024)
+        self.assertIs(service.repository.load_options["include_csharp"], True)
 
     def test_exact_csharp_line_works_without_opt_in(self) -> None:
-        result = self.make_service().inspect_action(
+        service = self.make_service()
+        result = service.inspect_action(
             "PQDL0QlL", csharp_line=3, include_generated_csharp=False
         )
 
         self.assertEqual(3, result["generated_csharp"]["requested_line"])
+        self.assertIs(service.repository.load_options["include_csharp"], True)
 
     def test_broad_params_return_compact_preview(self) -> None:
         result = self.make_service().inspect_action(

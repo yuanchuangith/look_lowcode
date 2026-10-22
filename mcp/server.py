@@ -13,6 +13,7 @@ if str(MCP_DIR) not in sys.path:
 from mcp.server.fastmcp import FastMCP
 
 from gxp_core.service import GxpReadonlyService
+from gxp_core.telemetry import traced_tool
 from gxp_core.cpm_snapshot import (
     cpm_snapshot_status,
     refresh_cpm_snapshot,
@@ -171,6 +172,37 @@ def analyze_business_graph(
 def resolve_action(identifier: str) -> dict[str, Any]:
     """Resolve an exact action code/RefId, falling back to an action-name search."""
     return service().resolve_action(identifier)
+
+
+def export_edit_handoff(
+    identifier: str,
+    targets: list[dict[str, str]],
+    change_spec: dict[str, Any],
+    diagnosis_source: dict[str, str],
+) -> dict[str, Any]:
+    """Export current design evidence locally for a confirmed proposed edit.
+
+    identifier must be an exact action code/RefId. Select 1-10 targets with exact
+    group_key/node_key. diagnosis_source requires version (draft/published),
+    design_id and data_sha256 from the inspected current copy. change_spec accepts
+    user_request, summary, changes, preserve and scenarios; see edit-handoff.md.
+    Saves only local design evidence, never business rows, credentials, generated
+    JS/C# or authorization. A later editor must verify the current draft.
+    """
+    return service().export_edit_handoff(identifier, targets, change_spec, diagnosis_source)
+
+
+def read_edit_handoff(
+    handoff_id: str = "", identifier: str = "", sha256: str = "",
+    target_index: int | None = None,
+) -> dict[str, Any]:
+    """Read a same-machine handoff by its hex ID, never by filesystem path.
+
+    Without ID, list candidates by exact action code/RefId; explicitly choose one,
+    never implicitly use the newest. target_index continues oversized records.
+    Reconfirm this dialogue's scope; no edit session or approval is inherited.
+    """
+    return GxpReadonlyService.read_edit_handoff(handoff_id, identifier, sha256, target_index=target_index)
 
 
 def search_actions(query: str, limit: int = 20) -> dict[str, Any]:
@@ -510,6 +542,8 @@ LOCAL_GRAPH_TOOLS = (
     analyze_business_graph,
 )
 
+LOCAL_HANDOFF_TOOLS = (export_edit_handoff, read_edit_handoff)
+
 
 def create_mcp(
     *,
@@ -517,6 +551,7 @@ def create_mcp(
     include_local_schema: bool = True,
     include_local_source: bool = True,
     include_local_graph: bool = True,
+    include_local_handoff: bool = True,
     **settings: Any,
 ) -> FastMCP:
     """Create one transport-specific MCP instance over the shared read-only tools."""
@@ -532,19 +567,22 @@ def create_mcp(
         **settings,
     )
     for tool in MCP_TOOLS:
-        app.tool()(tool)
+        app.tool()(traced_tool(tool))
     if include_local_cpm:
         for tool in LOCAL_CPM_TOOLS:
-            app.tool()(tool)
+            app.tool()(traced_tool(tool))
     if include_local_schema:
         for tool in LOCAL_SCHEMA_TOOLS:
-            app.tool()(tool)
+            app.tool()(traced_tool(tool))
     if include_local_source:
         for tool in LOCAL_SOURCE_TOOLS:
-            app.tool()(tool)
+            app.tool()(traced_tool(tool))
     if include_local_graph:
         for tool in LOCAL_GRAPH_TOOLS:
-            app.tool()(tool)
+            app.tool()(traced_tool(tool))
+    if include_local_handoff:
+        for tool in LOCAL_HANDOFF_TOOLS:
+            app.tool()(traced_tool(tool))
     return app
 
 

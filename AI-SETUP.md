@@ -7,7 +7,7 @@
 - 不读取、输出、记录或通过命令参数传递平台密码和数据库密码。
 - 密码只通过隐藏输入保存到操作系统凭据存储：Windows Credential Manager、macOS Keychain 或 Linux Secret Service。
 - Linux 没有可用的安全 keyring 后端时停止配置并提示安装系统 keyring，不得回退到明文文件。
-- CPM、开发库 Schema、源码业务链和业务关系图能力仅注册到本地 stdio；HTTP MCP 固定注册 16 个基础 Look 工具，本地 stdio 另含 5 个 CPM、7 个 Schema/可信关系、7 个源码工具和 6 个业务图谱工具，共 41 个。
+- CPM、开发库 Schema、源码业务链、业务关系图及编辑交接能力仅注册到本地 stdio；HTTP MCP 固定注册 16 个基础 Look 工具，本地 stdio 另含 5 个 CPM、7 个 Schema/可信关系、7 个源码、6 个业务图谱和 2 个本机编辑交接工具，共 43 个。
 
 ## 前置检查
 
@@ -61,7 +61,7 @@ macOS/Linux：
 python3 ./scripts/install_claude.py
 ```
 
-安装器会自动创建环境、挂载项目级与系统全局级 `.claude/skills/` 联接、将 `.claude/` 自动加入 `.gitignore`、配置 `.mcp.json`，并自检 41 个 MCP 工具的完整注册。在当前会话输入 `/gxp-lowcode-debug` 即可直接使用。
+安装器会自动创建环境、挂载项目级与系统全局级 `.claude/skills/` 联接、将 `.claude/` 自动加入 `.gitignore`、配置 `.mcp.json`，并自检 43 个 MCP 工具的完整注册。在当前会话输入 `/gxp-lowcode-debug` 即可直接使用。
 
 ## 首次配置和拉取
 
@@ -127,7 +127,7 @@ cpm whoami
 python .\scripts\install_claude.py --skip-runtime
 ```
 
-通过标准：输出 `[OK] MCP Tool verification passed: 41 tools registered.`，且在 Claude Code 输入 `/gxp-lowcode-debug` 可识别该技能。
+通过标准：输出 `[OK] MCP Tool verification passed: 43 tools registered.`，且在 Claude Code 输入 `/gxp-lowcode-debug` 可识别该技能。
 
 日常命令：
 
@@ -145,4 +145,4 @@ cpm whoami
 
 安装器不会刷新 CPM 或写业务数据／平台设计，也不改变凭据。首次使用图工具在系统数据目录初始化 business-graph.sqlite3，原 JSON 和 .legacy-v1.json 保留原样；旧记录缺身份或证据时保留待复核，不补猜。图缓存失败继续只读排查，不双写旧 JSON。
 
-仓库验收可执行 `python scripts/verify_business_graph_stdio.py --server-root <已安装插件目录>`；只使用临时目录和脱敏夹具，验证六个图工具与 A→B→C→D 融合，不向真实图注入测试数据。新建 Codex 线程才能加载更新后的 41 工具和技能。
+仓库验收可执行 `python scripts/verify_business_graph_stdio.py --server-root <已安装插件目录>`；只使用临时目录和脱敏夹具，验证六个图工具与 A→B→C→D 融合，不向真实图注入测试数据。新建 Codex 线程才能加载更新后的 43 工具和技能。

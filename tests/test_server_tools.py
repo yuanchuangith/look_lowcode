@@ -16,6 +16,7 @@ from server import (
     LOCAL_SOURCE_TOOLS,
     LOCAL_GRAPH_TOOLS,
     MCP_TOOLS,
+    LOCAL_HANDOFF_TOOLS,
     create_mcp,
     inspect_action,
     inspect_control_flow,
@@ -52,16 +53,17 @@ class ServerToolRegistrationTests(unittest.TestCase):
         self.assertFalse(signature.parameters["include_generated_csharp"].default)
         self.assertEqual(20, signature.parameters["max_nodes"].default)
 
-    def test_local_stdio_has_41_tools_and_http_factory_has_16(self) -> None:
+    def test_local_stdio_has_43_tools_and_http_factory_has_16(self) -> None:
         self.assertEqual(16, len(MCP_TOOLS))
         self.assertEqual(5, len(LOCAL_CPM_TOOLS))
         self.assertEqual(7, len(LOCAL_SCHEMA_TOOLS))
         self.assertEqual(7, len(LOCAL_SOURCE_TOOLS))
         self.assertEqual(6, len(LOCAL_GRAPH_TOOLS))
-        self.assertEqual(41, len(create_mcp()._tool_manager._tools))
+        self.assertEqual(2, len(LOCAL_HANDOFF_TOOLS))
+        self.assertEqual(43, len(create_mcp()._tool_manager._tools))
         self.assertEqual(
             16,
-            len(create_mcp(include_local_cpm=False, include_local_schema=False, include_local_source=False, include_local_graph=False)._tool_manager._tools),
+            len(create_mcp(include_local_cpm=False, include_local_schema=False, include_local_source=False, include_local_graph=False, include_local_handoff=False)._tool_manager._tools),
         )
 
     def test_business_graph_tools_are_local_only(self) -> None:
@@ -71,7 +73,7 @@ class ServerToolRegistrationTests(unittest.TestCase):
              "get_business_graph", "trace_business_data_flow", "analyze_business_graph"},
             names,
         )
-        http_names = {tool.name for tool in asyncio.run(create_mcp(include_local_cpm=False, include_local_schema=False, include_local_source=False, include_local_graph=False).list_tools())}
+        http_names = {tool.name for tool in asyncio.run(create_mcp(include_local_cpm=False, include_local_schema=False, include_local_source=False, include_local_graph=False, include_local_handoff=False).list_tools())}
         self.assertTrue(names.isdisjoint(http_names))
 
     def test_graph_calls_never_construct_a_database(self):
@@ -103,8 +105,15 @@ class ServerToolRegistrationTests(unittest.TestCase):
         with patch("http_server.create_mcp", wraps=create_mcp) as factory:
             create_http_app()
         self.assertIs(False, factory.call_args.kwargs["include_local_graph"])
+        self.assertIs(False, factory.call_args.kwargs["include_local_handoff"])
         names = {t.name for t in asyncio.run(create_mcp(**factory.call_args.kwargs).list_tools())}
         self.assertEqual({t.__name__ for t in MCP_TOOLS}, names)
+
+    def test_handoff_tools_are_local_only_and_read_has_no_database_dependency(self):
+        self.assertEqual({"export_edit_handoff", "read_edit_handoff"}, {tool.__name__ for tool in LOCAL_HANDOFF_TOOLS})
+        from server import read_edit_handoff
+        with patch("gxp_core.service.ReadOnlyDatabase", side_effect=AssertionError("No database required")):
+            self.assertFalse(read_edit_handoff("bad/path")["available"])
 
     def test_control_flow_defaults_match_public_contract(self) -> None:
         signature = inspect.signature(inspect_control_flow)

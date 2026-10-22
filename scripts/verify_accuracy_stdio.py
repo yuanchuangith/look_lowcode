@@ -18,7 +18,7 @@ async def verify(root: str, mode: str) -> dict:
         async with ClientSession(read, write) as session:
             await session.initialize()
             tools = await session.list_tools()
-            assert len(tools.tools) == (16 if mode == "http-registry" else 41)
+            assert len(tools.tools) == (16 if mode == "http-registry" else 43)
             schemas = {tool.name: tool.inputSchema for tool in tools.tools}
             assert "context" in schemas["diagnose_codex_input"]["properties"]
             assert "follow_calls" in schemas["inspect_control_flow"]["properties"]
@@ -37,8 +37,10 @@ async def verify(root: str, mode: str) -> dict:
                     reused = await session.call_tool(name, {"text": "改了再看看", "context": payload["conversation_context"]["record"]})
                     assert not reused.isError, reused
                     invalid = await session.call_tool(name, {"text": "改了再看看", "context": {"history": []}})
-                    assert invalid.isError, invalid
-                    assert "unsupported fields: history" in invalid.content[0].text, invalid
+                    invalid_payload = invalid.structuredContent or json.loads(invalid.content[0].text)
+                    assert invalid_payload["blocked"] and invalid_payload["error_code"] == "ValueError", invalid
+                    assert "unsupported fields: history" in invalid_payload["error"], invalid
+                    assert invalid_payload["trace_id"] and "total_elapsed_ms" in invalid_payload, invalid
                 elif name == "inspect_control_flow":
                     assert payload["call_flow"]["runtime_verified"] is False
                 elif "value_path" in arguments:
@@ -55,7 +57,7 @@ async def verify_launcher(root: str) -> dict:
         async with ClientSession(read, write) as session:
             await session.initialize()
             tools = await session.list_tools()
-            assert len(tools.tools) == 41
+            assert len(tools.tools) == 43
             schemas = {tool.name: tool.inputSchema for tool in tools.tools}
             assert "context" in schemas["diagnose_codex_input"]["properties"]
             assert "follow_calls" in schemas["inspect_control_flow"]["properties"]
