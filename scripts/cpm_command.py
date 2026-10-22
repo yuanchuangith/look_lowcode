@@ -72,7 +72,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     pull = commands.add_parser("pull", help="Safely refresh the local snapshot")
     pull.add_argument("--page", "-p", default=None, help="Page Route, Id, or OutId; omit for full pull")
-    pull.add_argument("--if-stale", action="store_true", help="Honor the 30-minute TTL")
+    pull.add_argument("--if-stale", action="store_true", help="Honor the configured snapshot TTL")
     pull.add_argument("--json", action="store_true", help="Print the complete JSON report")
 
     status = commands.add_parser("status", help="Show snapshot freshness and configuration status")

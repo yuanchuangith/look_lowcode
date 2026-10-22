@@ -35,7 +35,7 @@ description: Use this skill when the user asks to 排查或复核 GXP 低代码�
 
 - CPM 工具只读本地快照；刷新只更新本地文件，不修改平台设计、发布状态或业务数据。
 - CPM 与源码索引刷新相互独立；调用源码工具不会自动刷新 CPM 或 Schema，也不会执行开发库全量关系验证。
-- 页面级问题优先 `inspect_page_snapshot`，全局检索优先 `search_platform_snapshot`；工具会在快照超过 30 分钟时等待安全刷新。
+- 页面级问题优先 `inspect_page_snapshot`，全局检索优先 `search_platform_snapshot`；快照超过 90 分钟时，下次查询等待安全刷新，不在后台定时刷新。
 - 组件或编排元件参数知识按需调用 `get_cpm_knowledge`，一次只读一个白名单主题，不一次加载全部 `cpm-platform` 参考资料。
 - 输出增加 `CPM快照` 证据层。它用于候选定位，不能覆盖 Look 对当前发布副本、画布节点和业务记录的确认。
 - 数据库不可用时，可以输出明确标记的 CPM 快照候选；不得据此声称当前运行配置、发布状态或业务行为已经确认。

@@ -45,7 +45,6 @@ def main() -> int:
         node_path=str(Path(node_path).resolve()),
         cli_path=str(Path(cli_path).resolve()),
         snapshot_dir=str(snapshot.resolve()),
-        ttl_seconds=1800,
         timeout_seconds=300,
         concurrency=10,
     )

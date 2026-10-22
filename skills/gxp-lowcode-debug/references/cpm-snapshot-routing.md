@@ -14,7 +14,7 @@
 
 ## 刷新选择
 
-- 快照工具默认 `refresh_if_stale=true`。30 分钟内已有成功检查时直接读取；过期后同步等待刷新完成。
+- 快照工具默认 `refresh_if_stale=true`。90 分钟内已有成功检查时直接读取；过期后下次查询同步等待刷新完成，不在后台定时刷新。
 - 精确页面检查使用单页刷新。首次初始化、旧基线缺少 `page-meta.json`、全局搜索或基线损坏使用全量刷新。
 - 需要明确重新检查平台时调用 `refresh_cpm_snapshot(force=true, ...)`。刷新只写 `%LOCALAPPDATA%` 下本地快照。
 - 刷新失败或 300 秒超时时保留旧快照。响应中的 `failures`、`refreshed_at`、`refresh_mode` 和 `cli_version` 必须进入证据说明。

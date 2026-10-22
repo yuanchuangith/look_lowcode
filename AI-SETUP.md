@@ -119,7 +119,7 @@ cpm status
 cpm whoami
 ```
 
-通过标准：插件来源为 `look-lowcode-local` 且版本为 `0.5.0+codex.*`；`cpm --version` 输出 `0.3.1`；`cpm status` 显示配置中的 CPM TTL，默认 1800 秒；如需在线认证检查再运行 `cpm whoami`，不要把它作为源码/Schema 本地工具的必需步骤。
+通过标准：插件来源为 `look-lowcode-local` 且版本为 `0.5.0+codex.*`；`cpm --version` 输出 `0.3.1`；`cpm status` 显示配置中的 CPM TTL，默认 5400 秒（90 分钟，查询时按需刷新）；如需在线认证检查再运行 `cpm whoami`，不要把它作为源码/Schema 本地工具的必需步骤。
 
 ### Claude Code 验收
 

@@ -61,13 +61,13 @@ python scripts/install_claude.py --verify-only
 
 CPM 快照补充页面全貌、菜单、组件、模型、数据集、字典、事件、审批流程、接口和公共动作定位；Look 当前发布副本、画布节点、生成 C#、历史异常和业务记录仍是运行结论的权威证据。
 
-- `cpm_snapshot_status()`：查看成功检查时间、CLI 版本、刷新错误和 30 分钟 TTL。
+- `cpm_snapshot_status()`：查看成功检查时间、CLI 版本、刷新错误和 90 分钟 TTL。
 - `refresh_cpm_snapshot(force=false, page_identifier=null)`：刷新本地快照；完整基线存在时可安全更新单页。
 - `search_platform_snapshot(...)`：有界搜索平台资源。
 - `inspect_page_snapshot(...)`：按 Route/Id/OutId 检查页面结构、绑定和规则文件。
 - `get_cpm_knowledge(...)`：只读快照中 `cpm-platform` 技能的一个白名单主题。
 
-快照超过 1800 秒时工具会同步等待刷新，单次最多 300 秒。刷新在临时副本完成后才原子换入；超时或失败保留旧快照。平台密码只从 Windows Credential Manager 固定目标 `Codex.GxpLowcodeReadonly.Cpm` 读取，并仅通过子进程环境变量传给 CLI。
+快照超过 5400 秒时，下次查询会同步等待刷新，单次最多 300 秒；没有后台定时刷新。刷新在临时副本完成后才原子换入；超时或失败保留旧快照。平台密码只从 Windows Credential Manager 固定目标 `Codex.GxpLowcodeReadonly.Cpm` 读取，并仅通过子进程环境变量传给 CLI。
 
 ## 开发库 Schema 快照与可信关系
 
