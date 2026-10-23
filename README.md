@@ -1,10 +1,16 @@
 # gxp-lowcode-readonly
 
-GXP 低代码只读诊断 MCP。服务不会执行数据库写入、画布保存或发布。Windows/macOS/Linux 本地 stdio 包含 16 个 Look 工具、5 个 CPM 快照工具、7 个开发库 Schema/可信关系工具、7 个本地源码业务链工具、6 个本地业务图谱工具和 2 个本机交接工具，共 43 个；公网 Streamable HTTP 8890 仍只注册 16 个 Look 工具。关系否决和恢复、业务关系图及编辑交接仅保存在本机，不提供远程策略 API。
+GXP 低代码只读诊断 MCP。服务不会执行数据库写入、画布保存或发布。Windows/macOS/Linux 本地 stdio 包含 16 个 Look 工具、5 个 CPM 快照工具、7 个开发库 Schema/可信关系工具、7 个本地源码业务链工具、6 个本地业务图谱工具、2 个本机交接工具和 1 个本机数据库设置工具，共 44 个；公网 Streamable HTTP 8890 仍只注册 16 个 Look 工具。关系否决和恢复、业务关系图、编辑交接及数据库设置仅在本机，不提供远程设置 API。
+
+## 数据库统一设置入口
+
+在任一插件目录运行 `python scripts/database_settings.py`（macOS/Linux 可用 `python3`），即可打开 Look/Write 共用设置窗口。地址、端口、库名统一管理，各自账户和插件专属设置保留；密码隐藏输入，仅保存在操作系统凭据库。也可以对模型说“打开数据库设置”，或明确给出要更换的地址、端口、库名，由本机 `database_settings` 工具先读取 revision，再测试并保存指定字段。未配置数据库时同样可用；失败保留原配置，旧编辑流程尚未结束时阻止切换。
+
+只在用户要求配置时进入，不因安装或普通排查自动修改。模型不接收密码或连接串。操作说明见 [database-settings.md](skills/gxp-lowcode-debug/references/database-settings.md)。
 
 ## 排查与编辑交接、耗时观测
 
-`export_edit_handoff(identifier, targets, change_spec, diagnosis_source)` 集中核对当前草稿和刚刚诊断的当前副本，保存 1–10 个精确节点的设计证据；`read_edit_handoff(handoff_id="", identifier="", sha256="", target_index=null)` 在同机新对话明确选择和读取。编辑端通过可选 `handoff_ref` 核对复用；交接不授予编辑权限，不继承旧会话／审批。参数和边界见 [edit-handoff.md](skills/gxp-lowcode-debug/references/edit-handoff.md)。
+`export_edit_handoff(identifier, targets, change_spec, diagnosis_source, record_kind="edit_snapshot")` 默认保存 1–10 个精确节点及当前草稿的设计证据；`record_kind="diagnosis_only"` 配合 `targets=[]` 可保存尚未定位节点或没有草稿时的诊断，仍核对诊断来源。`read_edit_handoff` 支持按动作和环境筛选候选、分页续查及按 ID 读取。Write 普通启动提示同环境、同动作的少量候选，按需明确选择并通过可选 `handoff_ref` 核对复用；不继承旧会话或审批。参数和边界见 [edit-handoff.md](skills/gxp-lowcode-debug/references/edit-handoff.md)。
 
 Look 留下问题现象、证据和已有的原因、修复建议，可通过 `change_spec.diagnosis` 保存本机节点留证；尚无根因或方案时也可保存。记录与 `handoff_ref` 均为可选，不强制交接。Write 正常使用时先检查已有相关材料，证据足够则复用，不足时自行分析或调用 Look 补证；编译、人工审批和保存后核对照常执行。旧交接包仍可读取。
 
@@ -37,7 +43,7 @@ python scripts/install_claude.py --verify-only
 - 自动设置模块路径并发现测试，不需要 `pytest` 或手工设置 `PYTHONPATH`。无匹配测试、导入错误或断言失败均返回非零退出码。测试数量、耗时以实际输出为准。
 - 默认跳过真实数据库测试，即使外部设置了 `GXP_LIVE_TEST=1`；只有显式传入 `--live` 才启用在线只读检查。
 - Claude 安装默认验证 MCP，`--verify` 显式启用，`--no-verify` 跳过；`--verify-only` 只验证，不安装、不改配置。`--verify-timeout 15` 设置协议交互超时，另预留最多 15 秒清理子进程。
-- 自检通过实际 `scripts/start_mcp.mjs` 启动服务，执行 `initialize`、`ping`、`tools/list`，要求 43 个不重名工具；失败返回非零退出码。这不代表 43 个工具的业务功能或数据库连接均可用，自检不调用业务工具。
+- 自检通过实际 `scripts/start_mcp.mjs` 启动服务，执行 `initialize`、`ping`、`tools/list`，要求 44 个不重名工具；失败返回非零退出码。这不代表 44 个工具的业务功能或数据库连接均可用，自检不调用业务工具。
 - Windows 使用目录联接，Linux/macOS 使用目录软链接。相同链接重复安装保持不变；仅替换已有链接，遇到真实文件或目录会报错并保留内容，请先手工确认并迁移冲突目录。
 
 ## 本地业务关系网与数据流转图（0.5.0）
@@ -229,4 +235,4 @@ LoadCredential=db-password:/etc/gxp-lowcode-readonly/db-password
 2. 数据库白名单/ACL 允许服务主机 `43.135.137.212` 使用专用只读账号连接。
 3. CPM 页面 Network 中请求直达 `43.135.137.212:8890/mcp`，完成 Session、CORS 和至少一次真实只读工具调用。
 
-历史服务器验收曾列出 11 个工具；当前本地 stdio 定义为 43 个工具，HTTP MCP 入口固定为 16 个 Look 工具。关系否决记录、开发库 Schema 快照、源码索引和业务关系图均留在本地，HTTP 服务不再注册本地缓存工具。
+历史服务器验收曾列出 11 个工具；当前本地 stdio 定义为 44 个工具，HTTP MCP 入口固定为 16 个 Look 工具。关系否决记录、开发库 Schema 快照、源码索引、业务关系图及数据库设置均留在本地，HTTP 服务不注册本地工具。

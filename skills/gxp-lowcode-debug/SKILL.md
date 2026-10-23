@@ -1,13 +1,19 @@
 ---
 name: gxp-lowcode-debug
-description: Use this skill when the user asks to 排查或复核 GXP 低代码、开发库表结构或可信关系、周期培训、公共动作、表单动作、动作名称或编号定位、流程页面反查、试卷下拉、值被清空、无可选值、文件对应试卷、岗位矩阵申请或修订、岗位培训申请、DataFilter、组件实现、请求参数、API、Controller、Service、后端异常栈、草稿保存、发布同步、动态 C# 异常、字段映射或画布节点。通过 gxp-lowcode-readonly MCP 输出精确位置、问题证据及有依据的根因和修复建议，留下可复用的诊断材料；编辑端按需使用并自主补证，不要求先完成交接。
+description: Use this skill when the user asks to 排查或复核 GXP 低代码、开发库表结构或可信关系、周期培训、公共动作、表单动作、动作名称或编号定位、流程页面反查、试卷下拉、值被清空、无可选值、文件对应试卷、岗位矩阵申请或修订、岗位培训申请、DataFilter、组件实现、请求参数、API、Controller、Service、后端异常栈、草稿保存、发布同步、动态 C# 异常、字段映射或画布节点，或明确要求查看、更改 Look/Write 数据库连接设置。通过 gxp-lowcode-readonly MCP 输出精确位置、问题证据及有依据的根因和修复建议，留下可复用的诊断材料；编辑端按需使用并自主补证，不要求先完成交接。
 ---
 
 # GXP Low-Code Debug
 
-通过 `gxp-lowcode-readonly` MCP 从真实 ActionDesign、只读业务证据和本地 metadata-only 源码索引定位问题。不要询问、读取、输出或转述数据库连接信息。
+通过 `gxp-lowcode-readonly` MCP 从真实 ActionDesign、只读业务证据和本地 metadata-only 源码索引定位问题。普通诊断不读取或输出连接配置，任何模式都不询问、读取、输出或转述数据库密码。
 
 当前配置的数据库及其查询结果默认按开发环境理解，只有用户明确说明当前配置连接的是生产、测试或其他环境时才覆盖；用户仅要求“排查生产／正式／线上问题”不代表当前连接属于该环境，不得因此将当前库的查询结果当作生产数据或据此确认生产结论。
+
+## 本机数据库设置
+
+用户明确要求查看或更改 Look/Write 数据库设置时，使用本地 `database_settings`；未配置数据库时也可调用。`status` 只读非敏感本机设置，不连接数据库；`open` 打开统一设置窗口，用户可手动修改并隐藏输入密码。直接入口为插件目录中的 `python scripts/database_settings.py`，macOS/Linux 可用 `python3`。
+
+模型代改时先取 `status`，仅把用户已指定的 `host`、`port`、`database`、`look_user`、`write_user` 放进 `changes`，连同返回的 revision 作为 `expected_revision` 调用 `update`；不猜目标、不传连接串或密码。只需密码或更换账户凭据时用 `open`；不要要求用户把密码发到对话。用户已明确指定的配置修改无需再重复征求同意，缺少的必要目标值才需补充。完整约束见 [references/database-settings.md](references/database-settings.md)。
 
 ## 生产环境数据按批取证
 
@@ -229,11 +235,11 @@ description: Use this skill when the user asks to 排查或复核 GXP 低代码�
 
 ## 排查留证与编辑端按需使用
 
-Look 记录已取得的定位、设计版本、证据结论、已确认原因、修复建议和证据缺口，供后续任务复用；不因排查结束自动启动 Write，也不要求用户完成固定交接流程。按既有业务关系图规则保存已确认的 metadata-only 证据；需要保留精确节点参数供后续复用时，可按 [references/edit-handoff.md](references/edit-handoff.md) 使用 `export_edit_handoff`。导出属于可选的本机留证，不是启动编辑的前置条件。
+Look 记录已取得的定位、设计版本、证据结论、已确认原因、修复建议和证据缺口，供后续任务复用；不因排查结束自动启动 Write，也不要求用户完成固定交接流程。按既有业务关系图规则保存已确认的 metadata-only 证据；需要留证时按 [references/edit-handoff.md](references/edit-handoff.md) 使用 `export_edit_handoff`：默认模式保存精确节点参数；尚未定位节点或没有草稿时，用 `record_kind="diagnosis_only"`、空 targets 和已有 diagnosis 保存动作级证据。两种模式均重新核对诊断来源，不为补齐记录而猜测。导出属于可选的本机留证，不是启动编辑的前置条件。
 
 报告写明“哪里出问题 → 有证据支持的原因 → 可行修复及依据 → 怎样验证”，未知项明确标注。若保存本机记录，将已知诊断放入 `change_spec.diagnosis`；原因、规则或方案未定时可省略对应字段及 `changes`，不为凑齐留证而猜测。实际导出后才附真实 `handoff_ref`。
 
-Write 照常独立工作，先检查当前会话或可取得的相关留证是否完整且适用于当前草稿；足够则复用，证据不足、过期或出现矛盾时可以自主分析、使用自己的检查工具，或调用 Look 只读工具补证，不要求用户重新运行 Look 或导出完整方案。有新证据时可修正原诊断或方案，实质改变已授权修改范围仍按编辑约束处理。跨对话可用 `read_edit_handoff` 明确选择记录；记录不继承旧会话或审批。留证缺失或失败不阻断正常排查和编辑核对，也不要求重启。
+Write 照常独立工作，普通启动提示同环境、同动作的证据候选；先检查当前会话或相关留证是否完整且适用于当前草稿，足够则复用。证据不足、过期或出现矛盾时可自主分析、使用自己的检查工具，或调用 Look 只读工具补证，不要求用户重新运行 Look 或导出完整方案。有新证据时可修正原诊断或方案，实质改变已授权修改范围仍按编辑约束处理。跨对话可用 `read_edit_handoff` 按环境筛选、比较来源和诊断状态，跟随 `has_more/next_read` 分页并明确选择记录；不自动选最新，不继承旧会话或审批。留证缺失或失败不阻断正常排查和编辑核对，也不要求重启。
 
 ## 结构化工具失败
 

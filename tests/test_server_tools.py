@@ -17,6 +17,7 @@ from server import (
     LOCAL_GRAPH_TOOLS,
     MCP_TOOLS,
     LOCAL_HANDOFF_TOOLS,
+    LOCAL_SETTINGS_TOOLS,
     create_mcp,
     inspect_action,
     inspect_control_flow,
@@ -53,17 +54,18 @@ class ServerToolRegistrationTests(unittest.TestCase):
         self.assertFalse(signature.parameters["include_generated_csharp"].default)
         self.assertEqual(20, signature.parameters["max_nodes"].default)
 
-    def test_local_stdio_has_43_tools_and_http_factory_has_16(self) -> None:
+    def test_local_stdio_has_44_tools_and_http_factory_has_16(self) -> None:
         self.assertEqual(16, len(MCP_TOOLS))
         self.assertEqual(5, len(LOCAL_CPM_TOOLS))
         self.assertEqual(7, len(LOCAL_SCHEMA_TOOLS))
         self.assertEqual(7, len(LOCAL_SOURCE_TOOLS))
         self.assertEqual(6, len(LOCAL_GRAPH_TOOLS))
         self.assertEqual(2, len(LOCAL_HANDOFF_TOOLS))
-        self.assertEqual(43, len(create_mcp()._tool_manager._tools))
+        self.assertEqual(1, len(LOCAL_SETTINGS_TOOLS))
+        self.assertEqual(44, len(create_mcp()._tool_manager._tools))
         self.assertEqual(
             16,
-            len(create_mcp(include_local_cpm=False, include_local_schema=False, include_local_source=False, include_local_graph=False, include_local_handoff=False)._tool_manager._tools),
+            len(create_mcp(include_local_cpm=False, include_local_schema=False, include_local_source=False, include_local_graph=False, include_local_handoff=False, include_local_settings=False)._tool_manager._tools),
         )
 
     def test_business_graph_tools_are_local_only(self) -> None:
@@ -73,7 +75,7 @@ class ServerToolRegistrationTests(unittest.TestCase):
              "get_business_graph", "trace_business_data_flow", "analyze_business_graph"},
             names,
         )
-        http_names = {tool.name for tool in asyncio.run(create_mcp(include_local_cpm=False, include_local_schema=False, include_local_source=False, include_local_graph=False, include_local_handoff=False).list_tools())}
+        http_names = {tool.name for tool in asyncio.run(create_mcp(include_local_cpm=False, include_local_schema=False, include_local_source=False, include_local_graph=False, include_local_handoff=False, include_local_settings=False).list_tools())}
         self.assertTrue(names.isdisjoint(http_names))
 
     def test_graph_calls_never_construct_a_database(self):
@@ -106,14 +108,55 @@ class ServerToolRegistrationTests(unittest.TestCase):
             create_http_app()
         self.assertIs(False, factory.call_args.kwargs["include_local_graph"])
         self.assertIs(False, factory.call_args.kwargs["include_local_handoff"])
+        self.assertIs(False, factory.call_args.kwargs["include_local_settings"])
         names = {t.name for t in asyncio.run(create_mcp(**factory.call_args.kwargs).list_tools())}
         self.assertEqual({t.__name__ for t in MCP_TOOLS}, names)
+
+    def test_settings_are_local_only_and_available_without_database_configuration(self):
+        from server import database_settings
+        import sys
+        from types import ModuleType
+
+        self.assertEqual({"database_settings"}, {tool.__name__ for tool in LOCAL_SETTINGS_TOOLS})
+        tools = {tool.name: tool for tool in asyncio.run(create_mcp().list_tools())}
+        properties = tools["database_settings"].inputSchema["properties"]
+        self.assertEqual({"operation", "changes", "expected_revision"}, set(properties))
+        self.assertEqual({"status", "open", "update"}, set(properties["operation"]["enum"]))
+        self.assertEqual("status", properties["operation"]["default"])
+        backend = ModuleType("gxp_core.connection_settings")
+        with patch.object(backend, "manage_settings", create=True, return_value={"configured": False}) as manage, \
+             patch.dict(sys.modules, {"gxp_core.connection_settings": backend}), \
+             patch("server.service", side_effect=AssertionError("No database service required")):
+            self.assertFalse(database_settings()["configured"])
+            manage.assert_called_once_with("status", None, "")
+            database_settings("update", {"host": "db.example.test"}, "revision")
+            manage.assert_called_with("update", {"host": "db.example.test"}, "revision")
+            database_settings("open")
+            manage.assert_called_with("open", None, "")
 
     def test_handoff_tools_are_local_only_and_read_has_no_database_dependency(self):
         self.assertEqual({"export_edit_handoff", "read_edit_handoff"}, {tool.__name__ for tool in LOCAL_HANDOFF_TOOLS})
         from server import read_edit_handoff
         with patch("gxp_core.service.ReadOnlyDatabase", side_effect=AssertionError("No database required")):
             self.assertFalse(read_edit_handoff("bad/path")["available"])
+
+    def test_handoff_schema_exposes_optional_diagnosis_and_discovery_controls(self):
+        tools = {tool.name: tool for tool in asyncio.run(create_mcp().list_tools())}
+        export = tools["export_edit_handoff"].inputSchema["properties"]
+        self.assertEqual("edit_snapshot", export["record_kind"]["default"])
+        read = tools["read_edit_handoff"].inputSchema["properties"]
+        self.assertEqual("", read["environment_scope"]["default"])
+        self.assertEqual("", read["cursor"]["default"])
+        self.assertEqual(10, read["limit"]["default"])
+
+    def test_handoff_public_wrappers_forward_optional_controls(self):
+        from server import export_edit_handoff, read_edit_handoff
+        with patch("server.service") as service:
+            export_edit_handoff("code", [], {}, {}, record_kind="diagnosis_only")
+            service.return_value.export_edit_handoff.assert_called_once_with("code", [], {}, {}, record_kind="diagnosis_only")
+        with patch("server.GxpReadonlyService.read_edit_handoff") as read:
+            read_edit_handoff(identifier="code", environment_scope="a" * 64, cursor="opaque", limit=3)
+            read.assert_called_once_with("", "code", "", target_index=None, environment_scope="a" * 64, cursor="opaque", limit=3)
 
     def test_control_flow_defaults_match_public_contract(self) -> None:
         signature = inspect.signature(inspect_control_flow)

@@ -7,7 +7,8 @@ from typing import Any
 
 from .handoff_store import (
     HandoffError, HandoffStore, canonical_bytes, canonical_sha256, compare_targets,
-    environment_scope, normalize_targets, snapshot_targets, validate_change_spec,
+    design_content_sha256, environment_scope as destination_scope,
+    normalize_targets, snapshot_targets, validate_change_spec,
 )
 from .telemetry import stage
 
@@ -42,10 +43,19 @@ def _design_evidence(design: dict[str, Any]) -> dict[str, str]:
     return {"design_id": str(design["design_id"]), "data_sha256": checksum}
 
 
-def export_handoff(service: Any, identifier: str, targets: list[dict[str, str]], change_spec: dict[str, Any], diagnosis_source: dict[str, str]) -> dict[str, Any]:
+def export_handoff(service: Any, identifier: str, targets: list[dict[str, str]], change_spec: dict[str, Any], diagnosis_source: dict[str, str], *, record_kind: str = "edit_snapshot") -> dict[str, Any]:
     try:
-        targets = normalize_targets(targets)
+        if record_kind not in {"edit_snapshot", "diagnosis_only"}:
+            raise HandoffError("HANDOFF_FORMAT", "record_kind must be edit_snapshot or diagnosis_only")
         spec = validate_change_spec(change_spec)
+        diagnosis_only = record_kind == "diagnosis_only"
+        if diagnosis_only:
+            if targets != [] or not isinstance(targets, list):
+                raise HandoffError("HANDOFF_TARGETS", "A diagnosis_only record requires targets=[]; use edit_snapshot to retain target parameters")
+            if "diagnosis" not in spec or spec.get("changes"):
+                raise HandoffError("HANDOFF_CHANGE_SPEC", "A diagnosis_only record requires diagnosis and cannot contain proposed changes")
+        else:
+            targets = normalize_targets(targets)
         if (not isinstance(diagnosis_source, dict)
                 or set(diagnosis_source) != {"version", "design_id", "data_sha256"}
                 or diagnosis_source.get("version") not in {"draft", "published"}
@@ -64,27 +74,32 @@ def export_handoff(service: Any, identifier: str, targets: list[dict[str, str]],
             if len(matches) != 1:
                 raise HandoffError("HANDOFF_ACTION", "Use one exact action code or RefId; action-name search is not an edit identity")
             metadata = matches[0]
-        with stage("draft.read"):
-            draft = service.repository.load_design(metadata["ref_id"], version="draft", include_deleted=False)
-            draft_evidence = _design_evidence(draft)
-            if draft.get("version") != "draft":
-                raise HandoffError("HANDOFF_DESIGN", "Editable current draft is unavailable")
+        draft = None
+        draft_evidence = None
+        if not diagnosis_only:
+            with stage("draft.read"):
+                draft = service.repository.load_design(metadata["ref_id"], version="draft", include_deleted=False)
+                content = draft.get("data") if isinstance(draft.get("data"), str) else draft["data_json"]
+                draft_evidence = {**_design_evidence(draft), "semantic_sha256": design_content_sha256(content)}
+                if draft.get("version") != "draft":
+                    raise HandoffError("HANDOFF_DESIGN", "Editable current draft is unavailable")
         with stage("handoff.diagnosis_read"):
-            source = draft if diagnosis_source["version"] == "draft" else service.repository.load_design(metadata["ref_id"], version="published", include_deleted=False)
+            source = draft if draft is not None and diagnosis_source["version"] == "draft" else service.repository.load_design(metadata["ref_id"], version=diagnosis_source["version"], include_deleted=False)
             source_evidence = {"version": source.get("version"), **_design_evidence(source)}
             if source_evidence != diagnosis_source:
                 return {
                     **fallback(HandoffError("HANDOFF_STALE_DIAGNOSIS", "The diagnosed copy changed or is historical; reverify the current copy before export")),
-                    "diagnosis_source_observed": source_evidence, "draft_observed": draft_evidence,
+                    "diagnosis_source_observed": source_evidence,
+                    **({"draft_observed": draft_evidence} if draft_evidence is not None else {}),
                     "next_read": {"tool": "inspect_action", "arguments": {"identifier": metadata["ref_id"], "version": diagnosis_source["version"], "design_id": source_evidence["design_id"], "include_params": False}},
                 }
         with stage("handoff.capture", count=len(targets)):
-            snapshots = snapshot_targets(draft["data_json"], targets)
-            diagnosed = snapshot_targets(source["data_json"], targets, allow_missing=True)
+            snapshots = [] if diagnosis_only else snapshot_targets(draft["data_json"], targets)
+            diagnosed = [] if diagnosis_only else snapshot_targets(source["data_json"], targets, allow_missing=True)
             differences = compare_targets(diagnosed, snapshots)
             config = service.database.config
             record = {
-                "environment_scope": environment_scope(config),
+                "record_kind": record_kind, "environment_scope": destination_scope(config),
                 "action": {key: str(metadata.get(key) or "") for key in ("ref_id", "action_code", "action_name", "action_type", "page_id")},
                 "draft": draft_evidence, "diagnosis_source": source_evidence,
                 "targets": snapshots, "diagnosis_targets": diagnosed,
@@ -94,7 +109,7 @@ def export_handoff(service: Any, identifier: str, targets: list[dict[str, str]],
             result = HandoffStore().write(record)
         return {
             "available": True, **result, "source_target_differences": differences,
-            "diagnosis_matches_draft": source_evidence["data_sha256"] == draft_evidence["data_sha256"],
+            "diagnosis_matches_draft": None if diagnosis_only else source_evidence["data_sha256"] == draft_evidence["data_sha256"],
             "authorization_granted": False, "write_executed": False,
             "next_step": "Evidence was saved locally. The editor may optionally use handoff_ref or proceed with ordinary inspection. Check relevance and sufficiency first; analyze or call readonly Look tools for missing evidence. This record starts no editor session and grants no approval.",
         }
@@ -102,19 +117,26 @@ def export_handoff(service: Any, identifier: str, targets: list[dict[str, str]],
         return fallback(exc)
 
 
-def read_handoff(handoff_id: str = "", identifier: str = "", sha256: str = "", *, target_index: int | None = None) -> dict[str, Any]:
+def read_handoff(handoff_id: str = "", identifier: str = "", sha256: str = "", *, target_index: int | None = None, environment_scope: str = "", cursor: str = "", limit: int = 10) -> dict[str, Any]:
     try:
         store = HandoffStore()
         with stage("handoff.read"):
             if not handoff_id:
                 if sha256 or target_index is not None:
                     raise HandoffError("HANDOFF_ID", "Provide an exact handoff_id to read a checksum or target")
-                candidates = store.list(identifier)
-                return _bounded_response({"available": True, "candidates": candidates, "count": len(candidates), "selection_required": True, "authorization_granted": False, "next_step": "Choose an explicit handoff_id and sha256; do not automatically select the newest record."})
+                page = store.list_page(identifier, environment_scope, cursor=cursor, limit=limit, max_bytes=48 * 1024)
+                result = {"available": True, **page, "selection_required": True, "authorization_granted": False, "next_step": "Compare environment, source copy and diagnosis status, then choose an explicit handoff_id and sha256. Follow next_read for remaining candidates; do not automatically select the newest record."}
+                if page["has_more"]:
+                    result["next_read"] = {"tool": "read_edit_handoff", "arguments": {"identifier": identifier, "environment_scope": environment_scope, "cursor": page["next_cursor"], "limit": limit}}
+                return _bounded_response(result)
+            if cursor:
+                raise HandoffError("HANDOFF_ID", "cursor applies only to candidate lookup without handoff_id")
             record = store.read(handoff_id, sha256)
         checksum = canonical_sha256(record)
         if identifier and identifier not in {record["action"]["ref_id"], record["action"]["action_code"]}:
             raise HandoffError("HANDOFF_ACTION", "Handoff belongs to a different action")
+        if environment_scope and environment_scope != record["environment_scope"]:
+            raise HandoffError("HANDOFF_ENVIRONMENT", "Handoff belongs to a different environment")
         result = {"available": True, "handoff_ref": {"handoff_id": handoff_id, "sha256": checksum}, "authorization_granted": False, "requires_current_scope_confirmation": True}
         if target_index is not None:
             if type(target_index) is not int or not 0 <= target_index < len(record["targets"]):

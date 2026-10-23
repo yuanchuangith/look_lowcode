@@ -24,12 +24,12 @@ class GxpReadonlyService:
         self.inspector = CanvasInspector()
         self.diagnostics = DiagnosticEngine(self.repository, self.inspector)
 
-    def export_edit_handoff(self, identifier: str, targets: list[dict[str, str]], change_spec: dict[str, Any], diagnosis_source: dict[str, str]) -> dict[str, Any]:
-        return export_handoff(self, identifier, targets, change_spec, diagnosis_source)
+    def export_edit_handoff(self, identifier: str, targets: list[dict[str, str]], change_spec: dict[str, Any], diagnosis_source: dict[str, str], *, record_kind: str = "edit_snapshot") -> dict[str, Any]:
+        return export_handoff(self, identifier, targets, change_spec, diagnosis_source, record_kind=record_kind)
 
     @staticmethod
-    def read_edit_handoff(handoff_id: str = "", identifier: str = "", sha256: str = "", *, target_index: int | None = None) -> dict[str, Any]:
-        return read_handoff(handoff_id, identifier, sha256, target_index=target_index)
+    def read_edit_handoff(handoff_id: str = "", identifier: str = "", sha256: str = "", *, target_index: int | None = None, environment_scope: str = "", cursor: str = "", limit: int = 10) -> dict[str, Any]:
+        return read_handoff(handoff_id, identifier, sha256, target_index=target_index, environment_scope=environment_scope, cursor=cursor, limit=limit)
 
     @staticmethod
     def _graph_unavailable(exc: Exception) -> dict[str, Any]:

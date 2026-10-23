@@ -50,6 +50,26 @@ def connection_status() -> dict[str, Any]:
     return GxpReadonlyService.connection_status()
 
 
+def database_settings(
+    operation: Literal["status", "open", "update"] = "status",
+    changes: dict[str, Any] | None = None,
+    expected_revision: str = "",
+) -> dict[str, Any]:
+    """Manage local shared Look/Write database settings without initializing a database service.
+
+    status reads non-secret local settings without connecting. open launches the
+    local settings window for manual edits and hidden password entry. update
+    accepts only host, port, database, look_user and write_user explicitly supplied
+    by the user; pass the revision from status. It tests the candidate before
+    saving and blocks a switch while editor workflows remain active. Never pass
+    passwords or connection strings; this tool changes local settings, not business
+    data, and is available before database configuration.
+    """
+    from gxp_core.connection_settings import manage_settings
+
+    return manage_settings(operation, changes, expected_revision)
+
+
 def search_business_logic_graph(
     query: str | None = None,
     action: str | None = None,
@@ -179,11 +199,15 @@ def export_edit_handoff(
     targets: list[dict[str, str]],
     change_spec: dict[str, Any],
     diagnosis_source: dict[str, str],
+    record_kind: str = "edit_snapshot",
 ) -> dict[str, Any]:
     """Optionally retain current design evidence locally for later use.
 
-    identifier must be an exact action code/RefId. Select 1-10 targets with exact
-    group_key/node_key. diagnosis_source requires version (draft/published),
+    identifier must be an exact action code/RefId. Default edit_snapshot selects
+    1-10 exact group_key/node_key targets and captures the current draft.
+    diagnosis_only requires targets=[], diagnosis, no changes, and only reads the
+    diagnosed copy; use it before nodes are located or when no draft exists.
+    diagnosis_source requires version (draft/published),
     design_id and data_sha256 from the inspected current copy. change_spec accepts
     user_request, summary, changes, preserve, scenarios and optional diagnosis
     (issues, excluded, unresolved); see edit-handoff.md. Root cause, solution and
@@ -192,20 +216,24 @@ def export_edit_handoff(
     Saves only local design evidence, never business rows, credentials, generated
     JS/C# or authorization. A later editor must verify the current draft.
     """
-    return service().export_edit_handoff(identifier, targets, change_spec, diagnosis_source)
+    return service().export_edit_handoff(identifier, targets, change_spec, diagnosis_source, record_kind=record_kind)
 
 
 def read_edit_handoff(
     handoff_id: str = "", identifier: str = "", sha256: str = "",
     target_index: int | None = None,
+    environment_scope: str = "", cursor: str = "", limit: int = 10,
 ) -> dict[str, Any]:
     """Read a same-machine handoff by its hex ID, never by filesystem path.
 
-    Without ID, list candidates by exact action code/RefId; explicitly choose one,
+    Without ID, page candidates by exact action code/RefId, optionally filter the
+    exact environment_scope fingerprint returned by a prior record/editor result.
+    limit is 1-50; follow next_read even when a scan page has no matches. Compare
+    source version, diagnostic status and scope before explicitly choosing one;
     never implicitly use the newest. target_index continues oversized records.
     Reconfirm this dialogue's scope; no edit session or approval is inherited.
     """
-    return GxpReadonlyService.read_edit_handoff(handoff_id, identifier, sha256, target_index=target_index)
+    return GxpReadonlyService.read_edit_handoff(handoff_id, identifier, sha256, target_index=target_index, environment_scope=environment_scope, cursor=cursor, limit=limit)
 
 
 def search_actions(query: str, limit: int = 20) -> dict[str, Any]:
@@ -546,6 +574,7 @@ LOCAL_GRAPH_TOOLS = (
 )
 
 LOCAL_HANDOFF_TOOLS = (export_edit_handoff, read_edit_handoff)
+LOCAL_SETTINGS_TOOLS = (database_settings,)
 
 
 def create_mcp(
@@ -555,6 +584,7 @@ def create_mcp(
     include_local_source: bool = True,
     include_local_graph: bool = True,
     include_local_handoff: bool = True,
+    include_local_settings: bool = True,
     **settings: Any,
 ) -> FastMCP:
     """Create one transport-specific MCP instance over the shared read-only tools."""
@@ -585,6 +615,9 @@ def create_mcp(
             app.tool()(traced_tool(tool))
     if include_local_handoff:
         for tool in LOCAL_HANDOFF_TOOLS:
+            app.tool()(traced_tool(tool))
+    if include_local_settings:
+        for tool in LOCAL_SETTINGS_TOOLS:
             app.tool()(traced_tool(tool))
     return app
 

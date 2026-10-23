@@ -80,6 +80,10 @@ class DatabaseConfig:
 def load_config(path: Path | None = None) -> DatabaseConfig:
     config_path = path or default_config_path()
     if not config_path.exists():
+        if path is None:
+            from .connection_settings import active_settings, overlay_database
+            if active_settings() is not None:
+                return DatabaseConfig.from_dict(overlay_database({}, "look"))
         raise ConfigurationError(
             f"Connection configuration was not found at {config_path}. "
             "Run scripts/configure_connection.py first."
@@ -90,6 +94,9 @@ def load_config(path: Path | None = None) -> DatabaseConfig:
         raise ConfigurationError(f"Cannot read {config_path}: {exc}") from exc
     if not isinstance(value, dict):
         raise ConfigurationError("Database configuration must be a JSON object")
+    if path is None:
+        from .connection_settings import overlay_database
+        value = overlay_database(value, "look")
     return DatabaseConfig.from_dict(value)
 
 
@@ -113,7 +120,9 @@ def set_password(config: DatabaseConfig, password: str) -> None:
 
 def load_password(config: DatabaseConfig) -> str:
     password_file = os.environ.get("GXP_LOWCODE_DB_PASSWORD_FILE")
-    if password_file:
+    # Shared profiles use the exact OS credential tested by the settings window.
+    # Keep password-file overrides only for legacy / server configurations.
+    if password_file and not config.credential_target.startswith("GxpLowcode.Connection."):
         try:
             password = Path(password_file).expanduser().read_text(encoding="utf-8").rstrip("\r\n")
         except OSError as exc:

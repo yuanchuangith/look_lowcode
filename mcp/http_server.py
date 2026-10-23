@@ -47,6 +47,7 @@ def create_http_app(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT) -> ASGIA
         include_local_source=False,
         include_local_graph=False,
         include_local_handoff=False,
+        include_local_settings=False,
         host=host,
         port=port,
         streamable_http_path="/mcp",

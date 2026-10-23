@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import tempfile
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -129,16 +130,36 @@ def load_schema_config() -> SchemaSnapshotConfig:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        return SchemaSnapshotConfig()
+        raw = {}
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ValueError("schema.json 不是有效 UTF-8 JSON") from exc
     if not isinstance(raw, dict):
         raise ValueError("schema.json 顶层必须是对象")
-    return SchemaSnapshotConfig.from_dict(raw)
+    config = SchemaSnapshotConfig.from_dict(raw)
+    from .connection_settings import active_settings
+    active = active_settings()
+    if active is not None:
+        from .handoff_store import environment_scope
+        scope = environment_scope(active)
+        base_dir = Path(config.snapshot_dir)
+        if base_dir.parent.name == "environments" and re.fullmatch(r"[0-9a-f]{64}", base_dir.name):
+            base_dir = base_dir.parent.parent
+        base_scope = re.sub(r"\|database:[0-9a-f]{64}$", "", config.policy_scope_id)
+        config = replace(config, snapshot_dir=str(base_dir / "environments" / scope),
+                         policy_scope_id=base_scope + "|database:" + scope)
+    return config
 
 
 def save_schema_config(config: SchemaSnapshotConfig) -> Path:
     config.validate()
     path = schema_config_path()
-    _atomic_json(path, asdict(config))
+    value = asdict(config)
+    # Derived cache namespaces belong to the current connection, not to the
+    # user's base preferences. Switching back can reuse that environment's cache.
+    directory = Path(config.snapshot_dir)
+    if re.fullmatch(r".*\|database:[0-9a-f]{64}", config.policy_scope_id):
+        value["policy_scope_id"] = re.sub(r"\|database:[0-9a-f]{64}$", "", config.policy_scope_id)
+        if directory.parent.name == "environments" and re.fullmatch(r"[0-9a-f]{64}", directory.name):
+            value["snapshot_dir"] = str(directory.parent.parent)
+    _atomic_json(path, value)
     return path

@@ -2,7 +2,7 @@
 
 ## 工具与查询
 
-本地 stdio 共 41 个工具，其中 6 个图工具；HTTP 仍只有 16 个基础工具，不包含图谱。业务图和数据图是同一份本地 SQLite 的投影，不是两份缓存。
+本地 stdio 共 44 个工具，其中 6 个图工具；HTTP 仍只有 16 个基础工具，不包含图谱或数据库设置。业务图和数据图是同一份本地 SQLite 的投影，不是两份缓存。
 
 - search_business_logic_graph：旧关键词／动作／页面／表／字段／状态／环境／relation_id 检索保持兼容；历史案例仍可检索，current_published_designs 更新对应动作依赖，current_evidence_fingerprints 需指定 relation_id。历史必须复核当前证据。
 - upsert_business_logic_graph(relation)：接受旧 v2 或下述 format_version=3。返回 written、idempotent、relation、graph_revision 和 delta；delta 包含新增／复用实体和事实、更新实体／案例、新支持和待复核数量。

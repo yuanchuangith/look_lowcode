@@ -311,6 +311,58 @@ class EditHandoffServiceTests(unittest.TestCase):
                 self.assertEqual(spec, restored["record"]["change_spec"])
                 self.assertFalse(restored["authorization_granted"])
 
+    def test_diagnosis_only_published_evidence_needs_no_draft_or_nodes(self):
+        source = {"version": "published", "design_id": "published", "data_sha256": self.published["data_sha256"]}
+        repository_load = self.service.repository.load_design
+        def published_only(ref_id, *, version, include_deleted):
+            self.assertEqual("published", version)
+            return repository_load(ref_id, version=version, include_deleted=include_deleted)
+        with patch.object(self.service.repository, "load_design", side_effect=published_only):
+            exported = self.service.export_edit_handoff("code", [], evidence_only_spec(), source, record_kind="diagnosis_only")
+        self.assertTrue(exported["available"], exported)
+        record = HandoffStore().read(**exported["handoff_ref"])
+        self.assertEqual("diagnosis_only", record["record_kind"])
+        self.assertIsNone(record["draft"])
+        self.assertEqual([], record["targets"])
+        self.assertEqual([], record["diagnosis_targets"])
+        self.assertEqual([], record["source_target_differences"])
+        self.assertEqual(evidence_only_spec(), record["change_spec"])
+        read = GxpReadonlyService.read_edit_handoff(**exported["handoff_ref"])
+        self.assertTrue(read["response_complete"])
+        self.assertFalse(read["authorization_granted"])
+        bad_target = GxpReadonlyService.read_edit_handoff(**exported["handoff_ref"], target_index=0)
+        self.assertEqual("HANDOFF_TARGETS", bad_target["error_code"])
+
+    def test_diagnosis_only_rechecks_current_diagnosed_copy(self):
+        source = {"version": "published", "design_id": "historical", "data_sha256": self.published["data_sha256"]}
+        result = self.service.export_edit_handoff("code", [], evidence_only_spec(), source, record_kind="diagnosis_only")
+        self.assertEqual("HANDOFF_STALE_DIAGNOSIS", result["error_code"])
+        self.assertNotIn("draft_observed", result)
+        self.assertEqual([("published", False)], self.service.repository.calls)
+        self.assertFalse(list(HandoffStore().root.glob("*.json")))
+
+    def test_diagnosis_only_refuses_snapshot_targets_changes_or_missing_findings(self):
+        source = {"version": "published", "design_id": "published", "data_sha256": self.published["data_sha256"]}
+        for targets, spec, kind in [
+            (TARGETS, evidence_only_spec(), "diagnosis_only"),
+            ([], diagnosed_spec(), "diagnosis_only"),
+            ([], {"user_request": "Keep evidence", "summary": "No findings"}, "diagnosis_only"),
+            ([], evidence_only_spec(), "unknown"),
+            ([], evidence_only_spec(), "edit_snapshot"),
+        ]:
+            with self.subTest(kind=kind, targets=targets, spec=spec):
+                result = self.service.export_edit_handoff("code", targets, spec, source, record_kind=kind)
+                self.assertFalse(result["available"], result)
+        self.assertFalse(list(HandoffStore().root.glob("*.json")))
+
+    def test_default_snapshot_contains_semantic_fingerprint_and_keeps_source_strict(self):
+        exported = self.export()
+        self.assertTrue(exported["available"], exported)
+        record = HandoffStore().read(**exported["handoff_ref"])
+        self.assertEqual("edit_snapshot", record["record_kind"])
+        self.assertEqual(canonical_sha256(self.draft["data_json"]), record["draft"]["semantic_sha256"])
+        self.assertEqual({"version", "design_id", "data_sha256"}, set(record["diagnosis_source"]))
+
     def test_cross_dialogue_read_is_database_free_and_requires_explicit_scope(self):
         first, second = self.export(), self.export()
         with patch("gxp_core.service.ReadOnlyDatabase", side_effect=AssertionError("No DB")):
@@ -371,17 +423,50 @@ class EditHandoffServiceTests(unittest.TestCase):
         self.assertFalse(failed["available"])
         self.assertIn("handoff.diagnosis_read", [item["stage"] for item in failed["timings"]])
 
-    def test_large_candidate_list_explicitly_refuses_without_truncating_records(self):
+    def test_large_candidate_list_pages_without_truncating_records(self):
         record = make_record()
         record["change_spec"]["summary"] = "x" * 2000
         store = HandoffStore()
         references = [store.write(record)["handoff_ref"] for _ in range(35)]
-        result = GxpReadonlyService.read_edit_handoff(identifier="code")
-        self.assertFalse(result["available"])
-        self.assertEqual("HANDOFF_RESPONSE_LIMIT", result["error_code"])
-        self.assertLess(len(json.dumps(result).encode()), 64 * 1024)
+        result = GxpReadonlyService.read_edit_handoff(identifier="code", limit=50)
+        seen = []
+        while True:
+            self.assertTrue(result["available"], result)
+            self.assertLess(len(json.dumps(result).encode()), 64 * 1024)
+            seen.extend(item["handoff_id"] for item in result["candidates"])
+            if not result["has_more"]:
+                break
+            self.assertEqual("read_edit_handoff", result["next_read"]["tool"])
+            result = GxpReadonlyService.read_edit_handoff(**result["next_read"]["arguments"])
+        self.assertEqual(35, len(set(seen)))
         self.assertEqual(35, len(store.list("code")))
         self.assertTrue(GxpReadonlyService.read_edit_handoff(**references[0])["available"])
+
+    def test_environment_filter_survives_continuation_and_exact_read(self):
+        store = HandoffStore()
+        record = make_record()
+        desired_scope = record["environment_scope"]
+        wanted = [store.write(record)["handoff_ref"] for _ in range(3)]
+        record["environment_scope"] = "f" * 64
+        wrong = store.write(record)["handoff_ref"]
+        result = GxpReadonlyService.read_edit_handoff(identifier="code", environment_scope=desired_scope, limit=1)
+        seen = []
+        while True:
+            self.assertTrue(result["available"], result)
+            for candidate in result["candidates"]:
+                self.assertEqual(desired_scope, candidate["environment_scope"])
+                seen.append(candidate["handoff_id"])
+            if not result["has_more"]:
+                break
+            arguments = result["next_read"]["arguments"]
+            self.assertEqual(desired_scope, arguments["environment_scope"])
+            self.assertEqual(1, arguments["limit"])
+            result = GxpReadonlyService.read_edit_handoff(**arguments)
+        self.assertEqual({item["handoff_id"] for item in wanted}, set(seen))
+        mismatch = GxpReadonlyService.read_edit_handoff(**wrong, environment_scope=desired_scope)
+        self.assertEqual("HANDOFF_ENVIRONMENT", mismatch["error_code"])
+        invalid_cursor = GxpReadonlyService.read_edit_handoff(**wanted[0], cursor="cursor")
+        self.assertEqual("HANDOFF_ID", invalid_cursor["error_code"])
 
     def test_large_fallback_metadata_never_bypasses_response_budget(self):
         record = make_record()
@@ -389,7 +474,10 @@ class EditHandoffServiceTests(unittest.TestCase):
         record["change_spec"]["preserve"] = ["y" * 18000]
         reference = HandoffStore().write(record)["handoff_ref"]
         result = GxpReadonlyService.read_edit_handoff(**reference)
-        self.assertEqual("HANDOFF_RESPONSE_LIMIT", result["error_code"])
+        self.assertTrue(result["available"], result)
+        self.assertFalse(result["response_complete"])
+        self.assertTrue(result["summary"]["summary_truncated"])
+        self.assertEqual(["targets", "diagnosis_targets"], result["omitted"])
         self.assertLess(len(json.dumps(result).encode()), 64 * 1024)
         self.assertEqual(50000, len(HandoffStore().read(**reference)["action"]["action_name"]))
 
