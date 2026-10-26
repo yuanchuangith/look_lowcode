@@ -24,6 +24,8 @@
 
 检索、精确案例读取、邻域、路径和分析使用请求内 SQL 进度回调及 Python deadline；默认 5 秒、2500 万 SQLite VM 指令，内部仍保留原来的规模上限。中断明确返回 incomplete、未知总数与不完整范围，不提供案例不存在或真实孤岛的结论。发生中断的本地证据状态写入整体回滚。没有新增业务库迁移；未安装、推送或访问业务数据。
 
+预算范围：5秒限制通过查询阶段安装的 SQLite progress handler 及 Python 检查实施，不是严格的端到端响应上限。deadline 在请求入口建立，但首次本地缓存初始化、旧 JSON 导入、连接设置和锁等待不能被该 handler 抢占中断；这些阶段可能使总耗时超过5秒，锁等待另受 lock_timeout_seconds／SQLite busy_timeout 限制。进入查询阶段后检查已过去的时间；若已超时，仍返回 incomplete，不给完整计数或缺失结论。
+
 验证：`python -m unittest test_business_graph test_business_graph_catalog test_business_logic_graph test_source_lexical_contracts test_followup_contracts test_service test_control_flow test_accuracy_evidence test_graph_query_work`，152 项通过。新增8项覆盖只读事务／准确计数、SQL中断、Python deadline、版本与生命周期回滚、精确案例中断不误判缺失、批量读取、根／被调动作的 C# 载荷，以及重复目标顺序／循环／深度。40实体／20事实快照的读取查询最多7条，避免随每个实体／事实增长的查询次数。
 
 性能对照：`python scripts/benchmark_query_work.py --rounds 5 --output docs/query-work-benchmark-20261026.json`。对照第三批前的 `15f7e89`，相同临时 SQLite（1000案例，其中250有效）和内存源码索引（25001符号、35100边），5轮交替先后顺序。只忽略新增 `matched_count_complete` 元信息，三个输出的完整规范JSON SHA-256每轮一致。原始每轮时间、查询次数和指纹保存在上述JSON。
