@@ -380,8 +380,20 @@ def inspect_component_filters(
     include_params: bool = False,
     design_id: str | None = None,
     at_time: str | None = None,
+    response_detail: str = "summary",
+    max_output_bytes: int = 16384,
+    cursor: str | None = None,
+    limit: int = 10,
 ) -> dict[str, Any]:
-    """Inspect every DataFilter writer for one component across all action groups, without C#."""
+    """Count all DataFilter writers; return bounded summary/full pages, without C#.
+
+    summary is the default. full expands the current page, still within 8..64 KiB.
+    Reuse the same arguments and next_cursor; source changes reject the cursor.
+    A summary detail_cursor selects full detail for that record. Oversized records
+    use record_value_page text with character offsets; follow next_cursor to assemble.
+    Read exact node parameters through inspect_action.value_path, pinned to design_id.
+    All relevant writers/conditions must be checked before asserting the final filter.
+    """
     return service().inspect_component_filters(
         identifier,
         component,
@@ -389,6 +401,7 @@ def inspect_component_filters(
         include_params=include_params,
         design_id=design_id,
         at_time=at_time,
+        response_detail=response_detail, max_output_bytes=max_output_bytes, cursor=cursor, limit=limit,
     )
 
 
@@ -398,11 +411,21 @@ def compare_designs(ref_id: str) -> dict[str, Any]:
 
 
 def trace_dynamic_exception(
-    text: str, at_time: str | None = None, context_lines: int = 4
+    text: str, at_time: str | None = None, context_lines: int = 4,
+    response_detail: str = "summary", max_output_bytes: int = 16384,
+    cursor: str | None = None, limit: int = 10,
 ) -> dict[str, Any]:
-    """Trace a generated GXP C# stack frame to action history, calls and canvas nodes."""
+    """Trace an exception to version-bound bounded summary/full candidate pages.
+
+    Default summary: identities, counts and detail_cursor, no duplicated candidate aliases.
+    full retains candidate evidence for the selected page; budget is 8..64 KiB.
+    Continue with identical query arguments and next_cursor. Changed evidence rejects
+    continuation. record_value_page contains an oversized record's JSON text fragment.
+    A partial page never proves absent calls, conditions or historical candidates.
+    """
     return service().trace_dynamic_exception(
-        text, at_time=at_time, context_lines=context_lines
+        text, at_time=at_time, context_lines=context_lines,
+        response_detail=response_detail, max_output_bytes=max_output_bytes, cursor=cursor, limit=limit,
     )
 
 

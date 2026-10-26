@@ -86,6 +86,7 @@ description: Use this skill when the user asks to 排查或复核 GXP 低代码�
 - 仅当异常栈给出精确 C# 行，或节点事实仍不足以解释问题时，才显式传 `include_generated_csharp=true`。`terms` 不是读取生成 C# 的授权。
 - 工具默认32 KiB预算。响应的 `response_complete=false`、`evidence_complete=false` 或省略清单出现时按 `next_read` 续读，补齐前只报告候选；续读保留 design_id。生成代码优先 `generated_csharp_scope=group_method`，未解析范围时不要把全动作词命中当精确节点。
 - 下拉、过滤、值被覆盖问题必须改用 `inspect_component_filters` 汇总同一组件的全部 `DataFilter` 写入点；不能凭单个初始化节点下结论。
+- 过滤器与异常结果默认摘要、16 KiB 预算；按需使用 full、游标和精确字段续读。返回分页或遗漏时不得据摘要断言完整，读取 [references/diagnostic-output.md](references/diagnostic-output.md)。
 
 ## 嵌套控制流证据门禁
 
