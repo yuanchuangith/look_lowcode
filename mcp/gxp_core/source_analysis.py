@@ -15,6 +15,7 @@ from .cpm_config import load_cpm_config
 from .service import GxpReadonlyService
 from .source_hints import BACKEND_STACK_FRAME
 from .source_index import bounded_result, ensure_source_index, load_index_file, refresh_source_index as _refresh_source_index, source_index_status, source_read_view, source_index_generation
+from .source_index import SourceSnapshotChanged, verified_source_text
 
 
 MODEL_TERM = re.compile(r"\b(?:props\.)?([A-Za-z_$][\w$]*(?:Model|model|Dataset|dataset)[A-Za-z0-9_$]*)\b")
@@ -75,8 +76,14 @@ def _source_layers(*layers: str):
                     if attempt == 0:
                         continue
                     return bounded_result({**_base(status, layers), "status": "unresolved", "errors": [{"code": "SOURCE_INDEX_CHANGED_DURING_READ"}]})
-                with source_read_view(status):
-                    result = function(*args, **kwargs)
+                try:
+                    with source_read_view(status):
+                        result = function(*args, **kwargs)
+                except SourceSnapshotChanged as exc:
+                    if attempt == 0:
+                        continue
+                    return bounded_result({**_base(status, layers), "status": "unresolved",
+                        "errors": [{"code": str(exc)}], "unresolved": ["即时源码不属于本次索引版本，未返回混合证据"]})
                 if source_index_generation() != generation:
                     if attempt == 0:
                         continue
@@ -127,7 +134,7 @@ def _live_model_bindings(root: Path | None, files: list[dict[str, Any]]) -> list
     for file in files[:MAX_LIVE_FILES]:
         relative = str(file.get("path") or "")
         try:
-            lexed = LexedSource((root / relative).read_text(encoding="utf-8", errors="replace"))
+            lexed = LexedSource(verified_source_text(root, relative, "frontend"))
             lines = lexed.code.splitlines() if not lexed.errors else []
         except OSError:
             continue
@@ -446,7 +453,7 @@ def _exception_flow(root: Path | None, starts: list[dict[str, Any]]) -> list[dic
     result: list[dict[str, Any]] = []
     for item in starts[:20]:
         try:
-            lexed = LexedSource((root / item["path"]).read_text(encoding="utf-8", errors="replace"), language="csharp")
+            lexed = LexedSource(verified_source_text(root, item["path"], "backend"), language="csharp")
             lines = lexed.code.splitlines() if not lexed.errors else []
         except OSError:
             continue
@@ -632,7 +639,7 @@ def _term_evidence(root: Path | None, terms: tuple[str, ...], component_type: st
                 if component_type.casefold() not in relative_key and not relative_key.endswith("actiondesign/element/components/datafilter.tsx"):
                     continue
                 try:
-                    lexed = LexedSource((Path(directory) / name).read_text(encoding="utf-8", errors="replace"))
+                    lexed = LexedSource(verified_source_text(root, relative_path, "frontend"))
                     generated_filter = relative_key.endswith("actiondesign/element/components/datafilter.tsx")
                     lines = (lexed.clean if generated_filter else lexed.code).splitlines() if not lexed.errors else []
                 except OSError:

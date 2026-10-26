@@ -13,7 +13,7 @@ from .source_scope import is_source_dependency
 
 
 SOURCE_CONFIG_VERSION = 1
-SOURCE_INDEX_VERSION = 3
+SOURCE_INDEX_VERSION = 4
 DEFAULT_REPOSITORIES = {
     "frontend": (
         Path(r"F:\cpm\gxp2.components"),

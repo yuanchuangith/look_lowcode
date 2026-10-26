@@ -411,7 +411,10 @@ class BusinessGraphStore:
             result["graph_revision"] = int(connection.execute("SELECT value FROM meta WHERE key='revision'").fetchone()[0])
             if len(_encoded(result)) > MAX_RESPONSE_BYTES:
                 result["relation"].update(entities=[], facts=[], evidence=[], truncated=True,
-                                          next_step="Query get_business_graph for the committed entities and complete supports.")
+                                          next_step="Read search_business_logic_graph with exact case_key, scope_id and environment; require available, found, case_snapshot.complete and replacement_safe. Preserve snapshot_token for replacement.",
+                                          next_read={"tool": "search_business_logic_graph", "arguments": {
+                                              "case_key": normalized["case_key"], "scope_id": normalized["scope_id"],
+                                              "environment": normalized["environment"]}})
             return result
 
     def invalidate(self, relation_id: str, *, reason: str) -> dict:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import shutil
@@ -51,7 +52,11 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _read_text(path: Path) -> str:
+class SourceSnapshotChanged(RuntimeError):
+    pass
+
+
+def _read_bytes(path: Path) -> bytes:
     with path.open("rb") as stream:
         size = os.fstat(stream.fileno()).st_size
         if size > MAX_SOURCE_BYTES:
@@ -59,6 +64,13 @@ def _read_text(path: Path) -> str:
         data = stream.read(size + 1)
     if len(data) != size:
         raise ValueError("source_changed_during_read")
+    return data
+
+
+def _read_text(path: Path, fingerprints: dict | None = None, relative: str | None = None) -> str:
+    data = _read_bytes(path)
+    if fingerprints is not None:
+        fingerprints[relative] = hashlib.sha256(data).hexdigest()
     return data.decode("utf-8", errors="replace").replace("\r\n", "\n")
 
 
@@ -122,6 +134,7 @@ def _scan_frontend(root: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     symbols: list[dict[str, Any]] = []
     call_edges: list[dict[str, Any]] = []
     failures: list[dict[str, Any]] = []
+    fingerprints = {}
     anchor_terms = (
         "initialValues", "form.createField", "form.setValues", "dynamicFilter", "conditionFilter",
         "setFilter", "setConditionFilter", "filterInfo", "conditions", "SearchDataCenter", "QueryDataCenter", "dataSave",
@@ -129,7 +142,7 @@ def _scan_frontend(root: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     for path in files:
         relative = path.relative_to(root).as_posix()
         try:
-            text = _read_text(path)
+            text = _read_text(path, fingerprints, relative)
         except (OSError, ValueError) as exc:
             failures.append({"path": relative, "reason": str(exc)[:120]})
             continue
@@ -171,6 +184,7 @@ def _scan_frontend(root: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         "symbols": symbols,
         "call_edges": call_edges,
         "file_count": len(files),
+        "file_fingerprints": fingerprints,
     }
     return data, failures
 
@@ -199,17 +213,18 @@ def _scan_backend(root: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     files = _source_files(root, "backend")
     parsed = []
     failures = []
+    fingerprints = {}
     for path in files:
         relative = path.relative_to(root).as_posix()
         try:
-            data, lexed = parse_backend_file(_read_text(path), relative)
+            data, lexed = parse_backend_file(_read_text(path, fingerprints, relative), relative)
             if lexed.errors:
                 failures.append({"path": relative, "reason": "; ".join(lexed.errors[:5])})
                 continue
             parsed.append((data, lexed))
         except (OSError, ValueError) as exc:
             failures.append({"path": relative, "reason": str(exc)[:120]})
-    return bind_backend(parsed, len(files)), failures
+    return {**bind_backend(parsed, len(files)), "file_fingerprints": fingerprints}, failures
 
 
 def _data_access_kind(line: str) -> str | None:
@@ -267,6 +282,8 @@ def _write_layer(work: Path, layer: str, data: dict[str, Any]) -> None:
         }
     for filename, value in mapping.items():
         _write_json(target / filename, value)
+    _write_json(target / "file-fingerprints.json", {"version": 1,
+        "generation": data.get("fingerprint_generation"), "files": data.get("file_fingerprints", {})})
 
 
 def _commit_index(work: Path, target: Path) -> None:
@@ -302,7 +319,11 @@ def source_index_status(layers: Iterable[str] = ("frontend", "backend")) -> dict
             resolution = resolve_repository(layer)
             indexed = (manifest.get("repositories") or {}).get(layer) or {}
             layer_errors = [item for item in manifest.get("errors", []) if item.get("layer") == layer]
-            stale = indexed.get("fingerprint") != resolution["selected"]["fingerprint"] or indexed.get("index_version") != SOURCE_INDEX_VERSION or bool(layer_errors)
+            ledger = _read_json(target / layer / "file-fingerprints.json", {})
+            ledger_valid = (ledger.get("version") == 1 and indexed.get("fingerprint_generation")
+                            and ledger.get("generation") == indexed.get("fingerprint_generation")
+                            and isinstance(ledger.get("files"), dict))
+            stale = indexed.get("fingerprint") != resolution["selected"]["fingerprint"] or indexed.get("index_version") != SOURCE_INDEX_VERSION or bool(layer_errors) or not ledger_valid
             errors.extend(layer_errors)
             repositories[layer] = {**resolution, "index": indexed, "stale": stale, "parse_incomplete": bool(indexed.get("stats", {}).get("parse_failures"))}
         except SourceRepositoryError as exc:
@@ -327,6 +348,7 @@ def refresh_source_index(force: bool = False, *, layers: Iterable[str] = ("front
     target = source_index_root()
     target.parent.mkdir(parents=True, exist_ok=True)
     with _FileLock(source_index_lock_path(), 60):
+        generation = uuid.uuid4().hex
         current_manifest = _read_json(target / "manifest.json", {})
         resolutions: dict[str, Any] = {}
         layers = tuple(layers)
@@ -340,6 +362,8 @@ def refresh_source_index(force: bool = False, *, layers: Iterable[str] = ("front
             ((current_manifest.get("repositories") or {}).get(layer) or {}).get("fingerprint")
             == resolution["selected"]["fingerprint"]
             and ((current_manifest.get("repositories") or {}).get(layer) or {}).get("index_version") == SOURCE_INDEX_VERSION
+            and _read_json(target / layer / "file-fingerprints.json", {}).get("generation")
+                == ((current_manifest.get("repositories") or {}).get(layer) or {}).get("fingerprint_generation", "missing")
             for layer, resolution in resolutions.items()
         )
         if unchanged and not force and not errors:
@@ -354,7 +378,8 @@ def refresh_source_index(force: bool = False, *, layers: Iterable[str] = ("front
             for layer, resolution in resolutions.items():
                 selected = resolution["selected"]
                 indexed = (current_manifest.get("repositories") or {}).get(layer) or {}
-                if not force and indexed.get("fingerprint") == selected["fingerprint"] and indexed.get("index_version") == SOURCE_INDEX_VERSION and not any(item.get("layer") == layer for item in current_manifest.get("errors", [])):
+                ledger = _read_json(target / layer / "file-fingerprints.json", {})
+                if not force and indexed.get("fingerprint") == selected["fingerprint"] and indexed.get("index_version") == SOURCE_INDEX_VERSION and indexed.get("fingerprint_generation") and ledger.get("generation") == indexed["fingerprint_generation"] and not any(item.get("layer") == layer for item in current_manifest.get("errors", [])):
                     stats[layer] = {"status": "unchanged", **((current_manifest.get("repositories") or {}).get(layer) or {}).get("stats", {})}
                     graph_edges[layer] = _read_json(work / "graph" / f"{layer}-call-edges.json", [])
                     continue
@@ -363,6 +388,7 @@ def refresh_source_index(force: bool = False, *, layers: Iterable[str] = ("front
                     if resolve_repository(layer)["selected"]["fingerprint"] != selected["fingerprint"]:
                         raise RuntimeError("SOURCE_CHANGED_DURING_BUILD")
                     staged = work / f".build-{layer}"
+                    data["fingerprint_generation"] = generation
                     _write_layer(staged, layer, data)
                     _commit_index(staged / layer, work / layer)
                     shutil.rmtree(staged)
@@ -377,7 +403,8 @@ def refresh_source_index(force: bool = False, *, layers: Iterable[str] = ("front
                         "parse_failures": failures[:100],
                     }
                     stats[layer] = layer_stats
-                    repository_manifest[layer] = {**selected, "index_version": SOURCE_INDEX_VERSION, "stats": layer_stats, "indexed_at": _now()}
+                    repository_manifest[layer] = {**selected, "index_version": SOURCE_INDEX_VERSION,
+                        "fingerprint_generation": generation, "stats": layer_stats, "indexed_at": _now()}
                 except Exception as exc:
                     errors.append({"layer": layer, "code": "INDEX_BUILD_FAILED", "message": f"{type(exc).__name__}: {str(exc)[:300]}"})
                     stats[layer] = {"status": "stale", "preserved": (work / layer).is_dir()}
@@ -390,7 +417,7 @@ def refresh_source_index(force: bool = False, *, layers: Iterable[str] = ("front
             _write_json(graph / "route-edges.json", route_edges)
             manifest = {
                 "version": SOURCE_INDEX_VERSION,
-                "generation": uuid.uuid4().hex,
+                "generation": generation,
                 "built_at": _now(),
                 "repositories": repository_manifest,
                 "stats": stats,
@@ -421,7 +448,7 @@ _READ_VIEW: ContextVar[dict[str, Any] | None] = ContextVar("source_read_view", d
 
 @contextmanager
 def source_read_view(status: dict[str, Any]):
-    token = _READ_VIEW.set(status)
+    token = _READ_VIEW.set({**status, "_loaded_files": {}})
     try:
         yield
     finally:
@@ -458,7 +485,30 @@ def load_index_file(relative: str, default: Any) -> Any:
         repository = (active.get("repositories") or {}).get(layer) or {}
         if repository.get("stale", True) or repository.get("parse_incomplete"):
             return default
+        cache = active["_loaded_files"]
+        if relative not in cache:
+            cache[relative] = _read_json(source_index_root() / relative, default)
+        return cache[relative]
     return _read_json(source_index_root() / relative, default)
+
+
+def verified_source_text(root: Path, relative: str, layer: str) -> str:
+    """Hash and decode the same bytes that will be parsed; never mix indexed/live versions."""
+    active = _READ_VIEW.get()
+    target = (root / relative).resolve()
+    if not target.is_relative_to(root.resolve()):
+        raise SourceSnapshotChanged("SOURCE_FILE_OUTSIDE_REPOSITORY")
+    try:
+        data = _read_bytes(target)
+    except (OSError, ValueError) as exc:
+        raise SourceSnapshotChanged("SOURCE_FILE_UNAVAILABLE") from exc
+    if active is not None:
+        ledger = load_index_file(f"{layer}/file-fingerprints.json", {})
+        expected_generation = (((active.get("repositories") or {}).get(layer) or {}).get("index") or {}).get("fingerprint_generation")
+        if (not expected_generation or ledger.get("generation") != expected_generation or
+                (ledger.get("files") or {}).get(relative) != hashlib.sha256(data).hexdigest()):
+            raise SourceSnapshotChanged("SOURCE_FILE_CHANGED_SINCE_INDEX")
+    return data.decode("utf-8", errors="replace").replace("\r\n", "\n")
 
 
 

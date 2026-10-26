@@ -456,6 +456,16 @@ class BusinessGraphTests(unittest.TestCase):
         with closing(sqlite3.connect(self.store.path)) as connection:
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM evidence").fetchone()[0], 2)
 
+    def test_truncated_write_routes_to_exact_case_snapshot(self):
+        raw = observation("complete-case")
+        with patch("gxp_core.business_graph_store.MAX_RESPONSE_BYTES", 3000):
+            saved = self.store.upsert(raw)
+        self.assertTrue(saved["relation"]["truncated"])
+        read = saved["relation"]["next_read"]
+        self.assertEqual(read["tool"], "search_business_logic_graph")
+        self.assertEqual(read["arguments"]["case_key"], "complete-case")
+        self.assertTrue(self.store.search(**read["arguments"])["case_snapshot"]["complete"])
+
     def test_parallel_edge_budget_can_continue_with_cursor(self):
         raw = observation()
         for index in range(70):

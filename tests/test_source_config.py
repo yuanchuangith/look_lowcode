@@ -63,8 +63,8 @@ class SourceConfigTests(unittest.TestCase):
         with patch.dict("os.environ", {"GXP_LOWCODE_SOURCE_CONFIG": str(config_path)}):
             save_source_config(config)
             loaded = load_source_config()
-        self.assertEqual(config.frontend, loaded.frontend)
-        self.assertEqual(str(frontend), loaded.preferred_frontend)
+        self.assertEqual(tuple(str(Path(item).resolve()) for item in config.frontend), loaded.frontend)
+        self.assertEqual(str(frontend.resolve()), loaded.preferred_frontend)
         self.assertNotIn("token", config_path.read_text(encoding="utf-8").casefold())
         with self.assertRaises(ValueError):
             SourceRepositoriesConfig.from_dict({"frontend": [str(frontend)], "token": "bad"})

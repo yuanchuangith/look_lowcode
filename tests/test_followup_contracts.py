@@ -218,7 +218,7 @@ class DirtyScopeContracts(unittest.TestCase):
         (mirror/'notes.md').write_text('mirror notes',encoding='utf-8')
         config = SourceRepositoriesConfig(frontend=(str(self.checkout),str(mirror)))
         result = resolve_repository('frontend',config=config)
-        self.assertEqual(str(self.checkout),result['selected']['path'])
+        self.assertEqual(str(self.checkout.resolve()),result['selected']['path'])
 
 
 if __name__ == '__main__':
