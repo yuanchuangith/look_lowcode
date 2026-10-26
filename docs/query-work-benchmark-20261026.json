@@ -1,0 +1,257 @@
+{
+  "kind": "synthetic_local_only",
+  "baseline_ref": "15f7e89",
+  "round_count": 5,
+  "scope": "same synthetic SQLite snapshot; in-memory backend index; no configured source roots, business DB or MCP",
+  "comparison": "Exact canonical JSON hashes; only new matched_count_complete metadata removed for search",
+  "worker_startup_included": false,
+  "medians_seconds": {
+    "baseline": {
+      "graph_snapshot": 0.06293139996705577,
+      "graph_search": 0.17117749998578802,
+      "backend_trace": 1.0278620999888517
+    },
+    "candidate": {
+      "graph_snapshot": 0.05101180000929162,
+      "graph_search": 0.048218099982477725,
+      "backend_trace": 0.06463340000482276
+    }
+  },
+  "speedup": {
+    "graph_snapshot": 1.2336635828493219,
+    "graph_search": 3.5500672993749913,
+    "backend_trace": 15.902955745978945
+  },
+  "rounds": [
+    {
+      "round": 1,
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "baseline": {
+        "seconds": {
+          "graph_snapshot": 0.06293139996705577,
+          "graph_search": 0.17117749998578802,
+          "backend_trace": 1.0278620999888517
+        },
+        "semantic_sha256": {
+          "graph_snapshot": "df0b82687405d27d9bd95eb91f6342da180e854cf7dc1460747e9de5c6230e8e",
+          "graph_search": "95c28b6f00f696b3051e4a6eff492298b1a6525b425b9525a747c1cc38859dca",
+          "backend_trace": "5f3e4778a7c996693719acc066f5ec1af63550ee2b1dc267de94d2e83b45c9bb"
+        },
+        "snapshot_select_count": 1455,
+        "counts": {
+          "nodes": 1001,
+          "edges": 250,
+          "search_matches": 250,
+          "backend_calls": 10
+        }
+      },
+      "candidate": {
+        "seconds": {
+          "graph_snapshot": 0.05959469999652356,
+          "graph_search": 0.0480544000165537,
+          "backend_trace": 0.07070809998549521
+        },
+        "semantic_sha256": {
+          "graph_snapshot": "df0b82687405d27d9bd95eb91f6342da180e854cf7dc1460747e9de5c6230e8e",
+          "graph_search": "95c28b6f00f696b3051e4a6eff492298b1a6525b425b9525a747c1cc38859dca",
+          "backend_trace": "5f3e4778a7c996693719acc066f5ec1af63550ee2b1dc267de94d2e83b45c9bb"
+        },
+        "snapshot_select_count": 9,
+        "counts": {
+          "nodes": 1001,
+          "edges": 250,
+          "search_matches": 250,
+          "backend_calls": 10
+        }
+      },
+      "equivalent": true
+    },
+    {
+      "round": 2,
+      "order": [
+        "candidate",
+        "baseline"
+      ],
+      "candidate": {
+        "seconds": {
+          "graph_snapshot": 0.04902790003689006,
+          "graph_search": 0.04822890000650659,
+          "backend_trace": 0.06534809997538105
+        },
+        "semantic_sha256": {
+          "graph_snapshot": "df0b82687405d27d9bd95eb91f6342da180e854cf7dc1460747e9de5c6230e8e",
+          "graph_search": "95c28b6f00f696b3051e4a6eff492298b1a6525b425b9525a747c1cc38859dca",
+          "backend_trace": "5f3e4778a7c996693719acc066f5ec1af63550ee2b1dc267de94d2e83b45c9bb"
+        },
+        "snapshot_select_count": 9,
+        "counts": {
+          "nodes": 1001,
+          "edges": 250,
+          "search_matches": 250,
+          "backend_calls": 10
+        }
+      },
+      "baseline": {
+        "seconds": {
+          "graph_snapshot": 0.0595282000140287,
+          "graph_search": 0.1647131000063382,
+          "backend_trace": 1.0354028000147082
+        },
+        "semantic_sha256": {
+          "graph_snapshot": "df0b82687405d27d9bd95eb91f6342da180e854cf7dc1460747e9de5c6230e8e",
+          "graph_search": "95c28b6f00f696b3051e4a6eff492298b1a6525b425b9525a747c1cc38859dca",
+          "backend_trace": "5f3e4778a7c996693719acc066f5ec1af63550ee2b1dc267de94d2e83b45c9bb"
+        },
+        "snapshot_select_count": 1455,
+        "counts": {
+          "nodes": 1001,
+          "edges": 250,
+          "search_matches": 250,
+          "backend_calls": 10
+        }
+      },
+      "equivalent": true
+    },
+    {
+      "round": 3,
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "baseline": {
+        "seconds": {
+          "graph_snapshot": 0.06327819998841733,
+          "graph_search": 0.17184820002876222,
+          "backend_trace": 1.023058399965521
+        },
+        "semantic_sha256": {
+          "graph_snapshot": "df0b82687405d27d9bd95eb91f6342da180e854cf7dc1460747e9de5c6230e8e",
+          "graph_search": "95c28b6f00f696b3051e4a6eff492298b1a6525b425b9525a747c1cc38859dca",
+          "backend_trace": "5f3e4778a7c996693719acc066f5ec1af63550ee2b1dc267de94d2e83b45c9bb"
+        },
+        "snapshot_select_count": 1455,
+        "counts": {
+          "nodes": 1001,
+          "edges": 250,
+          "search_matches": 250,
+          "backend_calls": 10
+        }
+      },
+      "candidate": {
+        "seconds": {
+          "graph_snapshot": 0.05101180000929162,
+          "graph_search": 0.04718649998540059,
+          "backend_trace": 0.06244360003620386
+        },
+        "semantic_sha256": {
+          "graph_snapshot": "df0b82687405d27d9bd95eb91f6342da180e854cf7dc1460747e9de5c6230e8e",
+          "graph_search": "95c28b6f00f696b3051e4a6eff492298b1a6525b425b9525a747c1cc38859dca",
+          "backend_trace": "5f3e4778a7c996693719acc066f5ec1af63550ee2b1dc267de94d2e83b45c9bb"
+        },
+        "snapshot_select_count": 9,
+        "counts": {
+          "nodes": 1001,
+          "edges": 250,
+          "search_matches": 250,
+          "backend_calls": 10
+        }
+      },
+      "equivalent": true
+    },
+    {
+      "round": 4,
+      "order": [
+        "candidate",
+        "baseline"
+      ],
+      "candidate": {
+        "seconds": {
+          "graph_snapshot": 0.05052240000804886,
+          "graph_search": 0.04870160005521029,
+          "backend_trace": 0.06463340000482276
+        },
+        "semantic_sha256": {
+          "graph_snapshot": "df0b82687405d27d9bd95eb91f6342da180e854cf7dc1460747e9de5c6230e8e",
+          "graph_search": "95c28b6f00f696b3051e4a6eff492298b1a6525b425b9525a747c1cc38859dca",
+          "backend_trace": "5f3e4778a7c996693719acc066f5ec1af63550ee2b1dc267de94d2e83b45c9bb"
+        },
+        "snapshot_select_count": 9,
+        "counts": {
+          "nodes": 1001,
+          "edges": 250,
+          "search_matches": 250,
+          "backend_calls": 10
+        }
+      },
+      "baseline": {
+        "seconds": {
+          "graph_snapshot": 0.06942799995886162,
+          "graph_search": 0.1752651000279002,
+          "backend_trace": 1.021617399994284
+        },
+        "semantic_sha256": {
+          "graph_snapshot": "df0b82687405d27d9bd95eb91f6342da180e854cf7dc1460747e9de5c6230e8e",
+          "graph_search": "95c28b6f00f696b3051e4a6eff492298b1a6525b425b9525a747c1cc38859dca",
+          "backend_trace": "5f3e4778a7c996693719acc066f5ec1af63550ee2b1dc267de94d2e83b45c9bb"
+        },
+        "snapshot_select_count": 1455,
+        "counts": {
+          "nodes": 1001,
+          "edges": 250,
+          "search_matches": 250,
+          "backend_calls": 10
+        }
+      },
+      "equivalent": true
+    },
+    {
+      "round": 5,
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "baseline": {
+        "seconds": {
+          "graph_snapshot": 0.0587653000256978,
+          "graph_search": 0.16468680003890768,
+          "backend_trace": 1.0946038999827579
+        },
+        "semantic_sha256": {
+          "graph_snapshot": "df0b82687405d27d9bd95eb91f6342da180e854cf7dc1460747e9de5c6230e8e",
+          "graph_search": "95c28b6f00f696b3051e4a6eff492298b1a6525b425b9525a747c1cc38859dca",
+          "backend_trace": "5f3e4778a7c996693719acc066f5ec1af63550ee2b1dc267de94d2e83b45c9bb"
+        },
+        "snapshot_select_count": 1455,
+        "counts": {
+          "nodes": 1001,
+          "edges": 250,
+          "search_matches": 250,
+          "backend_calls": 10
+        }
+      },
+      "candidate": {
+        "seconds": {
+          "graph_snapshot": 0.06324629997834563,
+          "graph_search": 0.048218099982477725,
+          "backend_trace": 0.06281959998887032
+        },
+        "semantic_sha256": {
+          "graph_snapshot": "df0b82687405d27d9bd95eb91f6342da180e854cf7dc1460747e9de5c6230e8e",
+          "graph_search": "95c28b6f00f696b3051e4a6eff492298b1a6525b425b9525a747c1cc38859dca",
+          "backend_trace": "5f3e4778a7c996693719acc066f5ec1af63550ee2b1dc267de94d2e83b45c9bb"
+        },
+        "snapshot_select_count": 9,
+        "counts": {
+          "nodes": 1001,
+          "edges": 250,
+          "search_matches": 250,
+          "backend_calls": 10
+        }
+      },
+      "equivalent": true
+    }
+  ]
+}

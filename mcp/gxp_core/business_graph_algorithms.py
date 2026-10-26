@@ -5,6 +5,7 @@ from collections import deque
 
 from .business_graph_model import DATA_KINDS
 from .business_logic_graph import GraphValidationError, _digest
+from .graph_budget import check_query_budget
 
 
 def project(edges: list[dict], projection: str) -> list[dict]:
@@ -19,6 +20,7 @@ def project(edges: list[dict], projection: str) -> list[dict]:
 def adjacency(nodes: list[dict], edges: list[dict], reverse: bool = False, undirected: bool = False) -> dict:
     result = {node["id"]: [] for node in nodes}
     for edge in edges:
+        check_query_budget()
         source, target = (edge["target"], edge["source"]) if reverse else (edge["source"], edge["target"])
         if source in result and target in result:
             result[source].append((target, edge["id"]))
@@ -38,6 +40,7 @@ def neighborhood(nodes: list[dict], edges: list[dict], seeds: list[str], depth: 
     selected, frontier = set(), set()
     queue = deque((seed, 0) for seed in sorted(set(seeds)) if seed in known)
     while queue:
+        check_query_budget()
         current, distance = queue.popleft()
         if current in selected:
             continue
@@ -64,10 +67,12 @@ def components(nodes: list[dict], edges: list[dict]) -> list[list[str]]:
     links = adjacency(nodes, edges, undirected=True)
     remaining, result = set(links), []
     for root in links:
+        check_query_budget()
         if root not in remaining:
             continue
         pending, found = [root], set()
         while pending:
+            check_query_budget()
             current = pending.pop()
             if current in found:
                 continue
@@ -83,10 +88,12 @@ def strongly_connected(nodes: list[dict], edges: list[dict]) -> list[list[str]]:
     reverse = adjacency(nodes, edges, reverse=True)
     seen, order = set(), []
     for root in sorted(links):
+        check_query_budget()
         if root in seen:
             continue
         pending = [(root, False)]
         while pending:
+            check_query_budget()
             current, finished = pending.pop()
             if finished:
                 order.append(current)
@@ -98,10 +105,12 @@ def strongly_connected(nodes: list[dict], edges: list[dict]) -> list[list[str]]:
             pending.extend((neighbor, False) for neighbor, _ in reversed(links[current]) if neighbor not in seen)
     seen, result = set(), []
     for root in reversed(order):
+        check_query_budget()
         if root in seen:
             continue
         pending, found = [root], []
         while pending:
+            check_query_budget()
             current = pending.pop()
             if current in seen:
                 continue
@@ -137,6 +146,7 @@ def paths(nodes: list[dict], edges: list[dict], start: str, target: str | None =
     result, frontier = [], set()
     visits, deadline = 0, time.monotonic() + 5
     while queue and len(result) < max_paths and visits < 5000 and time.monotonic() < deadline:
+        check_query_budget()
         entity_path, edge_path = queue.popleft()
         visits += 1
         current = entity_path[-1]

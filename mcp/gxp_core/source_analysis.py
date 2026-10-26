@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 import subprocess
+from collections import defaultdict, deque
 from functools import wraps
 from pathlib import Path
 from typing import Any, Iterable
@@ -414,22 +415,29 @@ def trace_backend_call_chain(symbol_or_stack: str, max_depth: int = 6) -> dict[s
         return bounded_result(result)
     edges = load_index_file("graph/backend-call-edges.json", [])
     bindings = load_index_file("backend/service-bindings.json", [])
-    queue = [(item.get("symbol_id", item["name"]), 0) for item in starts]
+    outgoing_by_caller, symbols_by_id = defaultdict(list), defaultdict(list)
+    for edge in edges:
+        outgoing_by_caller[edge.get("caller_id", edge.get("caller"))].append(edge)
+    for index, item in enumerate(symbols):
+        if item.get("symbol_id"):
+            symbols_by_id[item["symbol_id"]].append((index, item))
+    queue = deque((item.get("symbol_id", item["name"]), 0) for item in starts)
     infrastructure = []
     unresolved_calls = []
     visited: set[str] = set()
     tree: list[dict[str, Any]] = []
     while queue and len(tree) < 200:
-        caller, level = queue.pop(0)
+        caller, level = queue.popleft()
         if caller in visited:
             continue
         visited.add(caller)
-        outgoing = [edge for edge in edges if edge.get("caller_id", edge.get("caller")) == caller]
+        outgoing = outgoing_by_caller.get(caller, [])
         for edge in outgoing:
             if edge.get("category") == "infrastructure":
                 infrastructure.append(edge)
                 continue
-            targets = [item for item in symbols if item.get("symbol_id") and item["symbol_id"] in edge.get("target_ids", [])]
+            targets = [item for _, item in sorted((entry for target in set(edge.get("target_ids", []))
+                       for entry in symbols_by_id.get(target, [])), key=lambda entry: entry[0])]
             if not targets and not edge.get("data_access"):
                 unresolved_calls.append(edge)
             tree.append({**edge, "depth": level, "targets": [item["name"] for item in targets], "ambiguous": len(targets) > 1})

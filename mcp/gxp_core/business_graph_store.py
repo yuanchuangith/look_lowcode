@@ -20,6 +20,7 @@ from .business_logic_graph import (
 )
 from .relation_policy import _PolicyFileLock, utc_now
 from .schema_config import load_schema_config, schema_runtime_root
+from .graph_budget import ACTIVE_BUDGET, GraphQueryBudgetExceeded, bounded_graph_query, check_query_budget
 
 SCHEMA_VERSION = 3
 MAX_DATABASE_BYTES = 256 * 1024 * 1024
@@ -71,13 +72,22 @@ def _json(value) -> str:
     return _encoded(value).decode("utf-8")
 
 
+def _chunks(values, size=400):
+    values = list(values)
+    for offset in range(0, len(values), size):
+        yield values[offset:offset + size]
+
+
 class BusinessGraphStore:
     def __init__(self, path: Path | None = None, *, legacy_path: Path | None = None,
-                 scope_id: str | None = None, lock_timeout_seconds: float = 5):
+                 scope_id: str | None = None, lock_timeout_seconds: float = 5,
+                 query_timeout_seconds: float = 5, query_vm_steps: int = 25000000):
         self.path = (path or schema_runtime_root() / "business-graph.sqlite3").resolve()
         self.legacy_path = (legacy_path or self.path.with_name("business-logic-graph.json")).resolve()
         self.scope = _text(scope_id or load_schema_config().policy_scope_id)
         self.timeout = lock_timeout_seconds
+        self.query_timeout_seconds = query_timeout_seconds
+        self.query_vm_steps = query_vm_steps
 
     @staticmethod
     def _sqlite_error(exc: sqlite3.Error) -> BusinessLogicGraphError:
@@ -150,16 +160,27 @@ class BusinessGraphStore:
             if self.path.stat().st_size > MAX_DATABASE_BYTES:
                 raise BusinessLogicGraphError("GRAPH_TOO_LARGE")
             connection = self._connect()
+            budget = ACTIVE_BUDGET.get()
+            if budget:
+                budget.check()
+                connection.set_progress_handler(budget.progress, 1000)
             connection.execute("BEGIN IMMEDIATE" if write else "BEGIN")
             yield connection
+            check_query_budget()
             if write and (self.path.stat().st_size + (self.path.with_name(self.path.name + "-wal").stat().st_size
                     if self.path.with_name(self.path.name + "-wal").exists() else 0) > MAX_DATABASE_BYTES):
                 raise BusinessLogicGraphError("GRAPH_TOO_LARGE")
             connection.commit()
-        except sqlite3.Error as exc:
+        except Exception as exc:
             if connection is not None:
+                connection.set_progress_handler(None, 0)
                 connection.rollback()
-            raise self._sqlite_error(exc) from exc
+            if isinstance(exc, sqlite3.Error):
+                budget = ACTIVE_BUDGET.get()
+                if budget and budget.exceeded:
+                    raise GraphQueryBudgetExceeded("GRAPH_QUERY_BUDGET_EXCEEDED") from exc
+                raise self._sqlite_error(exc) from exc
+            raise
         finally:
             if connection is not None:
                 connection.close()
@@ -442,6 +463,7 @@ class BusinessGraphStore:
                 self._bump(connection)
         return {"relation_id": relation_id, "changed": changed}
 
+    @bounded_graph_query
     def search(self, *, query=None, action=None, page=None, table=None, field=None, status=None,
                environment="development", limit=20, relation_id=None, current_published_designs=None,
                current_evidence_fingerprints=None, scope_id=None, case_key=None) -> dict:
@@ -468,15 +490,25 @@ class BusinessGraphStore:
         for key, value in fingerprints.items():
             _text(key)
             _hash(value)
-        with self._transaction(write=True) as connection:
+        with self._transaction(write=bool(dependencies or fingerprints)) as connection:
             if dependencies:
                 self._versions(connection, scope, environment, dependencies)
                 self._bump(connection)
-            rows = connection.execute("""SELECT observations.* FROM observations JOIN cases ON cases.id=observations.case_id
-                WHERE cases.scope=? AND cases.environment=? ORDER BY observations.created_at DESC,observations.revision DESC""",
-                                      (scope, environment)).fetchall()
-            matches = []
+            clauses, parameters = ["cases.scope=?", "cases.environment=?"], [scope, environment]
+            if relation_id:
+                clauses.append("(cases.id=? OR cases.case_key=?)")
+                parameters.extend((relation_id, relation_id))
+            if not fingerprints:
+                clauses.append("observations.lifecycle=?")
+                parameters.append(status if status in LIFECYCLE_STATUSES else "active")
+                if status in CONFIRMED_STATUSES:
+                    clauses.append("observations.level=?")
+                    parameters.append(status)
+            rows = connection.execute("SELECT observations.* FROM observations JOIN cases ON cases.id=observations.case_id WHERE "
+                + " AND ".join(clauses) + " ORDER BY observations.created_at DESC,observations.revision DESC", parameters)
+            matches, matched_count = [], 0
             for row in rows:
+                check_query_budget()
                 relation = self._relation(row)
                 if relation_id and relation["relation_id"] != relation_id:
                     continue
@@ -495,16 +527,25 @@ class BusinessGraphStore:
                 elif relation["lifecycle"] != "active" or status and relation["status"] != status:
                     continue
                 anchors = relation.get("anchors", [])
-                searchable = {"query": _json(relation),
-                              "action": " ".join(item["action_code"] + " " + item["ref_id"] for item in anchors),
-                              "page": " ".join(item["page"] for item in anchors),
-                              "table": " ".join(relation.get("tables", []) + relation.get("views", [])),
-                              "field": " ".join(relation.get("fields", []))}
-                if relation.get("format_version") == 3:
-                    for category in ("action", "page", "table", "field"):
-                        searchable[category] = _json(relation["entities"])
+                searchable = {}
+                if "query" in filters:
+                    searchable["query"] = _json(relation)
+                if relation.get("format_version") == 3 and any(key != "query" for key in filters):
+                    entity_text = _json(relation["entities"])
+                    searchable.update({key: entity_text for key in filters if key != "query"})
+                else:
+                    if "action" in filters:
+                        searchable["action"] = " ".join(item["action_code"] + " " + item["ref_id"] for item in anchors)
+                    if "page" in filters:
+                        searchable["page"] = " ".join(item["page"] for item in anchors)
+                    if "table" in filters:
+                        searchable["table"] = " ".join(relation.get("tables", []) + relation.get("views", []))
+                    if "field" in filters:
+                        searchable["field"] = " ".join(relation.get("fields", []))
                 if all(all(term in searchable[key].casefold() for term in value.split()) for key, value in filters.items()):
-                    matches.append(relation)
+                    matched_count += 1
+                    if len(matches) < limit:
+                        matches.append(relation)
             migration = json.loads(connection.execute("SELECT value FROM meta WHERE key='migration'").fetchone()[0])
             pending = [{"reason": row["reason"], **json.loads(row["body"])} for row in connection.execute("""SELECT reason,body FROM tasks
                 WHERE scope=? AND state='pending' AND reason IN ('legacy_review_required','identity_unresolved') LIMIT 50""", (scope,))]
@@ -513,14 +554,14 @@ class BusinessGraphStore:
             result = {"available": True, "source": "local_diagnostic_cache", "must_reverify_current_published_copy": True,
                       "reverification": "必须重新核对当前发布副本及当前只读证据。", "migration": migration,
                       "legacy_review_required": migration["rejected"] > 0 or bool(pending), "pending_review": pending,
-                      "matched_count": len(matches), "relations": [], "count": 0, "truncated": False}
+                      "matched_count": matched_count, "matched_count_complete": True, "relations": [], "count": 0, "truncated": False}
             for relation in matches[:limit]:
                 result["relations"].append(relation)
                 if len(_encoded(result)) > MAX_RESPONSE_BYTES:
                     result["relations"].pop()
                     break
             result["count"] = len(result["relations"])
-            result["truncated"] = result["count"] < len(matches)
+            result["truncated"] = result["count"] < matched_count
             return result
 
     def _snapshot(self, connection, scope: str, environment: str, include_catalog: bool) -> dict:
@@ -533,48 +574,77 @@ class BusinessGraphStore:
                            AND facts.kind NOT IN ('contains','belongs_to')))
             ORDER BY entities.id LIMIT 10001""",
                                          (scope, environment, include_catalog)).fetchall()
-        fact_rows = connection.execute("""SELECT facts.*,COUNT(supports.id) AS support_count FROM facts
+        fact_rows = connection.execute("""SELECT facts.*,COUNT(supports.id) AS support_count,MIN(supports.id) AS active_support_id FROM facts
             JOIN supports ON supports.fact_id=facts.id AND supports.lifecycle='active'
             WHERE facts.scope=? AND facts.environment=? GROUP BY facts.id ORDER BY facts.id LIMIT 20001""",
                                        (scope, environment)).fetchall()
+        aliases, bodies, boundaries = {}, {}, {}
+        for batch in _chunks(row["id"] for row in entity_rows[:10000]):
+            check_query_budget()
+            slots = ",".join("?" for _ in batch)
+            for row in connection.execute(f"SELECT entity_id,label FROM aliases WHERE entity_id IN ({slots}) ORDER BY entity_id,label", batch):
+                check_query_budget()
+                labels = aliases.setdefault(row["entity_id"], [])
+                if len(labels) < 20:
+                    labels.append(row["label"])
+        for batch in _chunks(row["active_support_id"] for row in fact_rows[:20000]):
+            check_query_budget()
+            slots = ",".join("?" for _ in batch)
+            for row in connection.execute(f"SELECT id,body FROM supports WHERE id IN ({slots})", batch):
+                bodies[row["id"]] = row["body"]
+        boundary_ids = [row["id"] for row in entity_rows[:10000] if json.loads(row["body"]).get("boundary", "unknown") != "unknown"]
+        observation_cache = {}
+        for batch in _chunks(boundary_ids):
+            slots = ",".join("?" for _ in batch)
+            rows = connection.execute(f"""WITH ranked AS (
+                SELECT sightings.entity_id,observations.id,observations.body,
+                    ROW_NUMBER() OVER(PARTITION BY sightings.entity_id ORDER BY observations.created_at DESC) AS rank
+                FROM sightings JOIN observations ON observations.id=sightings.observation_id
+                WHERE sightings.entity_id IN ({slots}) AND sightings.catalog=0 AND observations.lifecycle='active')
+                SELECT entity_id,id,body FROM ranked WHERE rank<=100 ORDER BY entity_id,rank""", batch)
+            for row in rows:
+                check_query_budget()
+                entity_id = row["entity_id"]
+                if entity_id in boundaries:
+                    continue
+                observation = observation_cache.get(row["id"])
+                if observation is None:
+                    observation = json.loads(row["body"])
+                    if len(observation_cache) < 128:
+                        observation_cache[row["id"]] = observation
+                boundary = next((candidate["boundary"] for candidate in observation["entities"] if candidate["id"] == entity_id), "unknown")
+                if boundary != "unknown":
+                    boundaries[entity_id] = boundary
         nodes = []
         for row in entity_rows[:10000]:
+            check_query_budget()
             if time.monotonic() - started >= 5:
                 break
             item = json.loads(row["body"])
             if item.get("boundary", "unknown") != "unknown":
-                item["boundary"] = "unknown"
-                boundary_rows = connection.execute("""SELECT observations.body FROM sightings
-                    JOIN observations ON observations.id=sightings.observation_id WHERE sightings.entity_id=?
-                    AND sightings.catalog=0 AND observations.lifecycle='active'
-                    ORDER BY observations.created_at DESC LIMIT 100""", (row["id"],))
-                for observed in boundary_rows:
-                    boundary = next((candidate["boundary"] for candidate in json.loads(observed["body"])["entities"]
-                                     if candidate["id"] == row["id"]), "unknown")
-                    if boundary != "unknown":
-                        item["boundary"] = boundary
-                        break
-            item["aliases"] = [alias[0] for alias in connection.execute(
-                "SELECT label FROM aliases WHERE entity_id=? ORDER BY label LIMIT 20", (row["id"],))]
+                item["boundary"] = boundaries.get(row["id"], "unknown")
+            item["aliases"] = aliases.get(row["id"], [])
             item["catalog"] = not bool(row["diagnostic"])
             nodes.append(item)
         node_ids = {node["id"] for node in nodes}
         edges = []
         for row in fact_rows[:20000]:
+            check_query_budget()
             if time.monotonic() - started >= 5:
                 break
             if row["source"] in node_ids and row["target"] in node_ids:
-                active = connection.execute("SELECT body FROM supports WHERE fact_id=? AND lifecycle='active' ORDER BY id LIMIT 1",
-                                            (row["id"],)).fetchone()
-                item = json.loads(active["body"])
+                item = json.loads(bodies[row["active_support_id"]])
                 item.pop("evidence_ids", None)
                 item["support_count"] = row["support_count"]
                 item["review_status"] = "historical_requires_current_reverification"
                 edges.append(item)
         stale = connection.execute("""SELECT DISTINCT facts.source,facts.target FROM facts
             JOIN supports ON supports.fact_id=facts.id WHERE facts.scope=? AND facts.environment=?
-            AND supports.lifecycle='stale'""", (scope, environment)).fetchall()
-        stale_entities = {row[key] for row in stale for key in ("source", "target")}
+            AND supports.lifecycle='stale'""", (scope, environment))
+        stale_entities = set()
+        for row in stale:
+            check_query_budget()
+            stale_entities.update((row["source"], row["target"]))
         for node in nodes:
             node["evidence_expired"] = node["id"] in stale_entities
         return {"nodes": nodes, "edges": edges,
@@ -620,6 +690,7 @@ class BusinessGraphStore:
             result["truncated"] = True
         selected = {node["id"] for node in result["nodes"]}
         for edge in edges:
+            check_query_budget()
             if edge["source"] not in selected or edge["target"] not in selected:
                 result["truncated"] = True
                 for endpoint in (edge["source"], edge["target"]):
@@ -669,6 +740,7 @@ class BusinessGraphStore:
             WHERE cases.scope=? AND cases.environment=? AND observations.lifecycle='active'
             ORDER BY observations.created_at DESC LIMIT 1001""", (scope, environment))
         for index, row in enumerate(rows):
+            check_query_budget()
             if index >= 1000 or time.monotonic() >= deadline:
                 return sorted(selected), False
             observation = json.loads(row["body"])
@@ -678,6 +750,7 @@ class BusinessGraphStore:
                 selected.update(item["id"] for item in observation["entities"] if item["id"] in known)
         return sorted(selected), True
 
+    @bounded_graph_query
     def get_graph(self, *, entity_ids=None, query=None, scope_id=None, environment="development",
                   projection="business", depth=2, include_catalog=False, request_id=None, edge_cursor=None) -> dict:
         from .business_graph_algorithms import neighborhood, project
@@ -702,6 +775,7 @@ class BusinessGraphStore:
             result["truncated"] = result["truncated"] or not query_complete
             return result
 
+    @bounded_graph_query
     def trace(self, *, start: str, target=None, direction="downstream", max_depth=8, max_paths=5,
               scope_id=None, environment="development") -> dict:
         from .business_graph_algorithms import paths, project
@@ -734,6 +808,7 @@ class BusinessGraphStore:
                 path["conditions_jointly_evaluated"] = False
             return result
 
+    @bounded_graph_query
     def analyze(self, *, scope_id=None, environment="development", projection="business",
                 include_catalog=True, entity_ids=None, request_id=None) -> dict:
         from .business_graph_algorithms import adjacency, components, condensation, project, strongly_connected

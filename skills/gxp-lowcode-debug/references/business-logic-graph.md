@@ -15,6 +15,8 @@
 
 邻域／展示最多 200 节点、400 边，响应最多 256 KiB。支持集合不可切半；一条边最多返回 3 份完整支持，evidence_page_complete=false 表示其他支持未展示。路径因响应预算丢失边时整条路径不返回。分析聚合计数来自完整 scope；成员清单可以采样，带 size 和 truncated。若邻接扫描预算耗尽则 status=incomplete，不报告真实孤岛。内部扫描最多 10000 实体／20000 有效事实；图算法不依赖 NetworkX。
 
+0.5.4 起，检索、精确案例读取、邻域、路径和分析共用单次请求的 SQL／Python 工作预算（默认 5 秒、2500 万 SQLite VM 指令）。预算耗尽返回 `status=incomplete`、`incomplete_reason=GRAPH_QUERY_BUDGET_EXCEEDED`、`scope_complete=false`、`query_complete=false`；`matched_count=null`、`matched_count_complete=false` 表示总数未知。结果不能证明案例不存在、路径不存在或实体孤立，应缩小条件或读取精确案例后继续；精确读取若仍耗尽，则仍不能替换整案。普通检索成功时 `matched_count_complete=true`，返回的 count 可因 limit／字节预算更小。证据状态更新若中断会整体回滚，不留下部分撤销。
+
 ## 同一案例必须完整替换
 
 `scope_id + environment + case_key` 标识一个案例。再次提交同一案例，会替换该案例的整份 observation 及其有效支持集合，未提交的旧事实会失去该案例支持；不是只修改传入的几条边。其他案例提供的独立有效支持继续保留。不自动猜测合并、不为了绕过替换另造 case_key。

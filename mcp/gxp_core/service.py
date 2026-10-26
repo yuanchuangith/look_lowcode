@@ -61,13 +61,14 @@ class GxpReadonlyService:
         scope_id: str | None = None,
     ) -> dict[str, Any]:
         try:
+            exact_options = {key: value for key, value in (("case_key", case_key), ("scope_id", scope_id)) if value is not None}
             result = BusinessLogicGraphStore().search(
                 query=query, action=action, page=page, table=table,
                 field=field, status=status, environment=environment, limit=limit,
                 relation_id=relation_id,
                 current_published_designs=current_published_designs,
                 current_evidence_fingerprints=current_evidence_fingerprints,
-                case_key=case_key, scope_id=scope_id,
+                **exact_options,
             )
             result["available"] = True
             return result
@@ -619,6 +620,7 @@ class GxpReadonlyService:
             design_id=design_id,
             at_time=at_time,
             include_deleted=bool(design_id or at_time),
+            include_csharp=False,
         )
         flow = self.inspector.inspect_control_flow(
             design["data_json"],
@@ -701,6 +703,7 @@ class GxpReadonlyService:
             design_id=design_id,
             at_time=at_time,
             include_deleted=bool(design_id or at_time),
+            include_csharp=False,
         )
         filters = self.inspector.inspect_component_filters(
             design["data_json"], component, include_params=False

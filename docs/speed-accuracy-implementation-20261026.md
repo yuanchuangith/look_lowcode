@@ -15,3 +15,25 @@
 写后图谱响应过大时现在提供精确案例工具调用及 scope/environment/case_key，要求完整快照与并发令牌；不再指向可能截断的图邻域拼整案。
 
 验证：44 项 source 系列测试、36 项 followup/repair/案例恢复测试通过（共80项）。新增6项源码台账验证覆盖 CRLF 原始字节、同大小同mtime改写、复用已验证字节、连续变化只重试一次、generation一致发布、缺台账重建及失败保留旧层；新增写后精确恢复回归。修正两处测试在Windows短路径与长路径表达上的不等价比较。全用临时目录或替身，无业务访问；未安装、推送或迁移业务数据库。
+
+## 第三批：减少无效读取并限制查询工作量（0.5.4）
+
+控制流根动作、公共被调动作及过滤器检查现在只取画布数据和 C# 指纹，不传输生成 C# 正文。后端调用追踪在单次请求构建 caller 邻接表和 symbol 多值映射，使用 deque；重复 symbol_id、原始候选顺序、歧义不自动展开、深度和循环语义保留。
+
+图检索在 SQL 中限制 scope／环境／精确关系／生命周期／级别，只有携带当前证据时才开启写事务；逐行处理，仅保留 limit 个结果但完整计数，不反复序列化未使用的字段。图快照分批读取别名、首个有效支持和边界 observation，保留别名排序／20 条上限、支持 ID 排序／支持数量、最新有效边界语义。
+
+检索、精确案例读取、邻域、路径和分析使用请求内 SQL 进度回调及 Python deadline；默认 5 秒、2500 万 SQLite VM 指令，内部仍保留原来的规模上限。中断明确返回 incomplete、未知总数与不完整范围，不提供案例不存在或真实孤岛的结论。发生中断的本地证据状态写入整体回滚。没有新增业务库迁移；未安装、推送或访问业务数据。
+
+验证：`python -m unittest test_business_graph test_business_graph_catalog test_business_logic_graph test_source_lexical_contracts test_followup_contracts test_service test_control_flow test_accuracy_evidence test_graph_query_work`，152 项通过。新增8项覆盖只读事务／准确计数、SQL中断、Python deadline、版本与生命周期回滚、精确案例中断不误判缺失、批量读取、根／被调动作的 C# 载荷，以及重复目标顺序／循环／深度。40实体／20事实快照的读取查询最多7条，避免随每个实体／事实增长的查询次数。
+
+性能对照：`python scripts/benchmark_query_work.py --rounds 5 --output docs/query-work-benchmark-20261026.json`。对照第三批前的 `15f7e89`，相同临时 SQLite（1000案例，其中250有效）和内存源码索引（25001符号、35100边），5轮交替先后顺序。只忽略新增 `matched_count_complete` 元信息，三个输出的完整规范JSON SHA-256每轮一致。原始每轮时间、查询次数和指纹保存在上述JSON。
+
+| 合成工作 | 修改前中位数 | 修改后中位数 | 比值 |
+| --- | ---: | ---: | ---: |
+| 图快照 | 62.93 ms | 51.01 ms | 1.23× |
+| 图检索 | 171.18 ms | 48.22 ms | 3.55× |
+| 后端调用追踪 | 1027.86 ms | 64.63 ms | 15.90× |
+
+测量不含子进程启动；不表示真实业务库、冷索引或完整诊断端到端具有同样倍数。C# 载荷优化由替身回归核对读取选项，不据此声称真实数据库网络耗时改善。
+
+补充验证：50项 source／server工具／技能契约测试通过，`skill-creator/scripts/quick_validate.py` 验证技能有效。本批共202项相关测试通过。

@@ -120,7 +120,7 @@ def expand_calls(repository, inspector, root_design: dict[str, Any], *, group: s
                         limits.add("depth" if depth >= max_depth else "actions")
                         continue
                     try:
-                        loaded[ref_id] = repository.load_design(ref_id, version=version, at_time=at_time, include_deleted=bool(at_time))
+                        loaded[ref_id] = repository.load_design(ref_id, version=version, at_time=at_time, include_deleted=bool(at_time), include_csharp=False)
                     except Exception:
                         unresolved.append({"via": location, "reason": "callee_design_unavailable"})
                         continue

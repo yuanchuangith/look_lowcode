@@ -95,7 +95,10 @@ def search_business_logic_graph(
     Supply only case_key, scope_id and environment for the complete latest exact-case
     snapshot, including withdrawn support states and a snapshot_token for safe replacement.
     Do not combine case_key with other filters/current-evidence maps. found=false is
-    authoritative only when available=true. Never treat a graph neighborhood as a full case.
+    authoritative only when available=true and no incomplete status is present.
+    SQL/Python work exhaustion returns status=incomplete, matched_count=null and
+    matched_count_complete=false. Narrow the query; never infer case absence or islands.
+    Never treat a graph neighborhood as a full case.
     """
     return GxpReadonlyService.search_business_logic_graph(
         query=query, action=action, page=page, table=table, field=field,
@@ -163,6 +166,7 @@ def get_business_graph(
     Always reverify current published evidence before reusing a historical fact.
     edge_cursor continues omitted parallel edges under the same seeds/depth; check
     graph_revision between pages and restart if it changed.
+    Work-budget exhaustion returns status=incomplete and scope_complete=false.
     """
     return GxpReadonlyService.get_business_graph(
         entity_ids=entity_ids, query=query, scope_id=scope_id, environment=environment,
@@ -180,6 +184,7 @@ def trace_business_data_flow(
     Depth 1..20, max 5 paths. Structural edges and unbound calls never create lineage.
     Returns edge conditions/mappings/granularity and complete evidence supports.
     Static reachability does not assert actual execution; current evidence needs review.
+    Work-budget exhaustion returns status=incomplete, never proof of no path.
     """
     return GxpReadonlyService.trace_business_data_flow(
         start=start, target=target, direction=direction, max_depth=max_depth,
@@ -197,6 +202,7 @@ def analyze_business_graph(
     Incomplete budgeted adjacency never reports real islands. Isolated identities are
     valid; gaps are not bugs. Coverage denominator is only materialized known catalogs.
     Shared request_id permits bounded existing-catalog lookup, never recursive refresh.
+    SQL and Python share a work budget; status=incomplete has no isolation conclusion.
     """
     return GxpReadonlyService.analyze_business_graph(
         scope_id=scope_id, environment=environment, projection=projection,
