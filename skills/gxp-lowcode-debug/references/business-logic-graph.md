@@ -4,8 +4,8 @@
 
 本地 stdio 共 44 个工具，其中 6 个图工具；HTTP 仍只有 16 个基础工具，不包含图谱或数据库设置。业务图和数据图是同一份本地 SQLite 的投影，不是两份缓存。
 
-- search_business_logic_graph：旧关键词／动作／页面／表／字段／状态／环境／relation_id 检索保持兼容；历史案例仍可检索，current_published_designs 更新对应动作依赖，current_evidence_fingerprints 需指定 relation_id。历史必须复核当前证据。
-- upsert_business_logic_graph(relation)：接受旧 v2 或下述 format_version=3。返回 written、idempotent、relation、graph_revision 和 delta；delta 包含新增／复用实体和事实、更新实体／案例、新支持和待复核数量。
+- search_business_logic_graph：旧关键词／动作／页面／表／字段／状态／环境／relation_id 检索保持兼容；历史案例仍可检索，current_published_designs 更新对应动作依赖，current_evidence_fingerprints 需指定 relation_id。历史必须复核当前证据。新增精确模式 `search_business_logic_graph(case_key=..., scope_id=..., environment="development")`，不与其他筛选或当前证据参数混用；返回最新完整案例快照，不受普通检索的状态过滤、分页或邻域裁剪影响。
+- upsert_business_logic_graph(relation, expected_case_snapshot?)：接受旧 v2 或下述 format_version=3。返回 written、idempotent、relation、graph_revision 和 delta；delta 包含新增／复用实体和事实、更新实体／案例、新支持和待复核数量。`expected_case_snapshot` 接受精确模式返回的 snapshot_token；空字符串表示仅在案例尚不存在时创建，省略则保留旧调用行为。
 - invalidate_business_logic_graph：保留历史；reason 为 user_confirmed_incorrect（invalidated）、published_design_changed／evidence_invalidated（stale）。只撤销匹配案例支持，其他有效支持不受影响。
 - get_business_graph(entity_ids?, query?, scope_id?, environment="development", projection="business", depth=2, include_catalog=false, request_id?, edge_cursor?)：entity_ids 是返回的规范化 SHA-256 ID；关键词也匹配历史别名，以及案例结论、case_key 和旧 business_keywords；案例种子扫描最多 1000 条／1 秒，query_complete=false 时用案例检索定位精确实体继续。depth 0–5；业务／数据投影和目录实体开关。
 - trace_business_data_flow(start, target?, direction="downstream", max_depth=8, max_paths=5, scope_id?, environment="development")：start／target 使用规范化实体 ID，direction 为 upstream／downstream，深度 1–20，最多 5 条有向路径。
@@ -15,7 +15,19 @@
 
 邻域／展示最多 200 节点、400 边，响应最多 256 KiB。支持集合不可切半；一条边最多返回 3 份完整支持，evidence_page_complete=false 表示其他支持未展示。路径因响应预算丢失边时整条路径不返回。分析聚合计数来自完整 scope；成员清单可以采样，带 size 和 truncated。若邻接扫描预算耗尽则 status=incomplete，不报告真实孤岛。内部扫描最多 10000 实体／20000 有效事实；图算法不依赖 NetworkX。
 
-## v3 增量输入
+## 同一案例必须完整替换
+
+`scope_id + environment + case_key` 标识一个案例。再次提交同一案例，会替换该案例的整份 observation 及其有效支持集合，未提交的旧事实会失去该案例支持；不是只修改传入的几条边。其他案例提供的独立有效支持继续保留。不自动猜测合并、不为了绕过替换另造 case_key。
+
+修改同一案例前，先按精确 case_key 读取。只有 `available=true` 且 `found=false` 才表示案例不存在；不可将工具缺失、报错或普通关键词无结果当作不存在。已有案例须检查 `case_snapshot.complete=true`，从 `case_snapshot.relation` 保留全部仍有效的实体、事实及其完整证据，再合入本次确认的增删改，携带 `expected_case_snapshot=snapshot_token` 提交。该 relation 的 eN/fN 是本次可直接提交的局部 ID；supports 中的 replacement_fact_id 对应 fN，fact_id 是规范事实 ID，二者不混用。v2 快照保留完整旧输入，replacement_fact_id 为 null。
+
+快照包含最新版本及逐事实的 supports.lifecycle，最新案例即使 stale／invalidated 也会返回；不能把旧事实直接重新提升为 active。保留或替换的事实均须复核当前发布副本及当前证据，尤其对非 active 支持逐一重新取证。`replacement_safe=false` 表示 v3 有尚未消歧的身份，须先明确处理 unresolved，不能直接提交仅含已解析项的 relation 让待复核信息消失。不要用图邻域或截断的检索结果拼完整案例。
+
+快照令牌覆盖最新 observation、其状态及逐事实支持状态；提交在同一写事务中核对。若返回 `conflict=true`、`written=false`、`cache_error=GRAPH_CASE_SNAPSHOT_CHANGED`，未发生写入，重新读取、合并并复核，不省略令牌强行重试。快照响应或重提交体超过大小限制时返回 `GRAPH_CASE_SNAPSHOT_TOO_LARGE`，不会返回伪装成完整的部分结果；保留现有记录并继续诊断。
+
+例如案例已有 A→B、A→C，本次只修正 A→B，应先读完整快照，保留 A→C 及其已重新核对的完整支持，修改 A→B 后连同 snapshot_token 一次提交。只有确认 A→C 应撤销时才从该案例完整替换输入中删除它；另一案例对 A→C 的独立证据不受影响。
+
+## v3 案例完整输入
 
 必填：format_version=3、case_key、conclusion、status、entities、facts、evidence。scope_id 默认当前 Schema 配置的非敏感 scope，environment 默认 development；request_id 可选。只接受 confirmed_static／confirmed_data／runtime_verified，候选不入事实图。最多 200 实体、400 事实、100 证据；单次输入 128 KiB。
 

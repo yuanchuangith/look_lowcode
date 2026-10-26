@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import re
 from pathlib import Path
 
 
@@ -68,17 +69,34 @@ class SkillContractTests(unittest.TestCase):
     def test_editor_requires_user_confirmation_of_concrete_plan(self) -> None:
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")
         prompt = (SKILL_ROOT / "agents" / "openai.yaml").read_text(encoding="utf-8")
-        self.assertIn("只读到编辑的显式授权门禁", skill)
-        self.assertIn("用户确认具体修改方案前，不得调用任何 `gxp-lowcode-editor` MCP 工具", skill)
-        self.assertIn("用户明确确认已展示的具体修改方案后，可以调用 `gxp-lowcode-editor` MCP 工具", skill)
-        self.assertIn("输出修改方案不构成编辑授权", skill)
-        self.assertIn("无需显式调用 `$gxp-lowcode-edit`", skill)
-        self.assertIn("不重复索要确认", skill)
-        self.assertIn("conversation_id", skill)
-        self.assertIn("不得绕过工具门禁", skill)
-        self.assertIn("用户明确确认后才可调用 gxp-lowcode-editor", prompt)
-        self.assertNotIn("不得加载或主动转入", skill)
-        self.assertNotIn("不得调用或转入", prompt)
+        section = re.search(r"## 只读到编辑的显式授权门禁\n(.*?)(?=\n## |\Z)", skill, re.S)
+        self.assertIsNotNone(section)
+        policy = section.group(1)
+        # Check authorization and activation separately: confirming a plan grants
+        # its scope, while the editor still requires initial explicit activation.
+        for pattern in (r"用户确认.*方案前.*不得调用.*gxp-lowcode-editor",
+                        r"用户明确确认.*具体修改方案后.*修改范围已获授权",
+                        r"gxp-lowcode-edit.*首次显式调用",
+                        r"尚未启用.*不提前调用编辑工具",
+                        r"已启用.*同一对话.*无需重复调用技能",
+                        r"同一方案.*不重复索要确认"):
+            self.assertRegex(policy, pattern)
+        for term in ("输出修改方案不构成编辑授权", "conversation_id", "不得绕过工具门禁",
+                     "不发布", "不改业务数据"):
+            self.assertIn(term, policy)
+        for term in ("具体修改方案", "明确确认", "显式启用", "gxp-lowcode-editor", "未发布草稿", "不发布"):
+            self.assertIn(term, prompt)
+        self.assertNotIn("无需显式调用 `$gxp-lowcode-edit`", policy)
+
+    def test_skill_local_reference_links_resolve(self) -> None:
+        sources = [SKILL_ROOT / "SKILL.md", SKILL_ROOT / "references" / "business-logic-graph.md"]
+        for source in sources:
+            for target in re.findall(r"(?<!!)\[[^\]]+\]\(([^)]+)\)", source.read_text(encoding="utf-8")):
+                with self.subTest(source=source.name, target=target):
+                    self.assertNotRegex(target, r"^(?:https?://|file://|vscode://)")
+                    resolved = (source.parent / target.split("#", 1)[0]).resolve()
+                    self.assertTrue(resolved.is_relative_to(SKILL_ROOT.resolve()))
+                    self.assertTrue(resolved.is_file())
 
     def test_source_escalation_is_hit_driven_and_bounded(self) -> None:
         skill = (SKILL_ROOT / "SKILL.md").read_text(encoding="utf-8")

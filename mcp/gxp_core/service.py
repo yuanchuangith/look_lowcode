@@ -56,6 +56,8 @@ class GxpReadonlyService:
         relation_id: str | None = None,
         current_published_designs: dict[str, str] | None = None,
         current_evidence_fingerprints: dict[str, str] | None = None,
+        case_key: str | None = None,
+        scope_id: str | None = None,
     ) -> dict[str, Any]:
         try:
             result = BusinessLogicGraphStore().search(
@@ -64,6 +66,7 @@ class GxpReadonlyService:
                 relation_id=relation_id,
                 current_published_designs=current_published_designs,
                 current_evidence_fingerprints=current_evidence_fingerprints,
+                case_key=case_key, scope_id=scope_id,
             )
             result["available"] = True
             return result
@@ -71,11 +74,15 @@ class GxpReadonlyService:
             return GxpReadonlyService._graph_unavailable(exc)
 
     @staticmethod
-    def upsert_business_logic_graph(relation: dict[str, Any]) -> dict[str, Any]:
+    def upsert_business_logic_graph(relation: dict[str, Any], expected_case_snapshot: str | None = None) -> dict[str, Any]:
         try:
-            result = BusinessLogicGraphStore().upsert(relation)
+            result = BusinessLogicGraphStore().upsert(relation, expected_case_snapshot=expected_case_snapshot)
             return {"available": True, **result}
         except (BusinessLogicGraphError, ValueError, OSError, TypeError) as exc:
+            if isinstance(exc, GraphValidationError) and str(exc) == "GRAPH_CASE_SNAPSHOT_CHANGED":
+                return {"available": True, "written": False, "conflict": True,
+                        "cache_error": "GRAPH_CASE_SNAPSHOT_CHANGED",
+                        "next_step": "Read the exact case_key snapshot again, merge and reverify retained facts, then retry with its snapshot_token."}
             return {**GxpReadonlyService._graph_unavailable(exc), "written": False}
 
     @staticmethod

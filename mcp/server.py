@@ -82,6 +82,8 @@ def search_business_logic_graph(
     relation_id: str | None = None,
     current_published_designs: dict[str, str] | None = None,
     current_evidence_fingerprints: dict[str, str] | None = None,
+    case_key: str | None = None,
+    scope_id: str | None = None,
 ) -> dict[str, Any]:
     """Search local historical conclusions, evidence, nodes/edges and Mermaid.
 
@@ -90,16 +92,21 @@ def search_business_logic_graph(
     current_published_designs maps RefId to the observed current design ID;
     current_evidence_fingerprints maps evidence ID to SHA-256 (requires relation_id).
     Differences mark old local revisions stale; this performs no database reads.
+    Supply only case_key, scope_id and environment for the complete latest exact-case
+    snapshot, including withdrawn support states and a snapshot_token for safe replacement.
+    Do not combine case_key with other filters/current-evidence maps. found=false is
+    authoritative only when available=true. Never treat a graph neighborhood as a full case.
     """
     return GxpReadonlyService.search_business_logic_graph(
         query=query, action=action, page=page, table=table, field=field,
         status=status, environment=environment, limit=limit,
         relation_id=relation_id, current_published_designs=current_published_designs,
         current_evidence_fingerprints=current_evidence_fingerprints,
+        case_key=case_key, scope_id=scope_id,
     )
 
 
-def upsert_business_logic_graph(relation: dict[str, Any]) -> dict[str, Any]:
+def upsert_business_logic_graph(relation: dict[str, Any], expected_case_snapshot: str | None = None) -> dict[str, Any]:
     """Persist a confirmed metadata-only conclusion locally; never writes business data.
 
     V3: format_version=3, case_key, conclusion, status, entities, facts, evidence;
@@ -108,6 +115,13 @@ def upsert_business_logic_graph(relation: dict[str, Any]) -> dict[str, Any]:
     entity/evidence IDs with normalized conditions/mappings. Evidence has fingerprints,
     complete action/Schema/source dependencies and optional precise anchors.
     Delta reports new/reused/updated/pending-review counts; cases fuse by entity IDs.
+    Reusing a case_key replaces that case's entire observation/support set; omitted
+    facts lose this case's support. Read search_business_logic_graph(case_key=...) first,
+    merge the complete snapshot with verified changes and pass its snapshot_token as
+    expected_case_snapshot. Empty string guards creation of an absent case; None keeps
+    legacy unguarded behavior. A conflict writes nothing: reread and merge again.
+    Check support lifecycles; retained stale/invalidated facts require current evidence
+    before promotion. replacement_safe=false requires resolving the pending identities.
     The following v2 input remains supported without guessing missing global identity.
     relation fields: relation_key, environment, conclusion, business_keywords, status,
     anchors, published_design_id, tables, views, fields, nodes, edges, evidence.
@@ -119,7 +133,7 @@ def upsert_business_logic_graph(relation: dict[str, Any]) -> dict[str, Any]:
     evidence checks. Never send credentials, records, complete parameters or C#.
     See the Skill reference business-logic-graph.md for fields and confirmation gates.
     """
-    return GxpReadonlyService.upsert_business_logic_graph(relation)
+    return GxpReadonlyService.upsert_business_logic_graph(relation, expected_case_snapshot=expected_case_snapshot)
 
 
 def invalidate_business_logic_graph(

@@ -12,7 +12,7 @@ import threading
 from contextlib import contextmanager
 from pathlib import Path
 
-from .business_graph_model import adapt_legacy, namespace, normalize_v3, stable_identity
+from .business_graph_model import MAX_OBSERVATION_BYTES, adapt_legacy, namespace, normalize_v3, stable_identity
 from .business_logic_graph import (
     BusinessLogicGraphError, CONFIRMED_STATUSES, LIFECYCLE_STATUSES, REASON_CODES,
     RELATION_FIELDS, GraphValidationError, MAX_GRAPH_BYTES, MAX_RESPONSE_BYTES,
@@ -342,6 +342,7 @@ class BusinessGraphStore:
         legacy = observation["legacy"]
         result = copy.deepcopy(legacy) if legacy else {
             "format_version": 3, "relation_id": observation["case_id"], "scope_id": observation["scope_id"],
+            "case_key": observation["case_key"],
             "environment": observation["environment"], "conclusion": observation["conclusion"],
             "status": observation["status"], "entities": observation["entities"],
             "facts": observation["facts"], "evidence": observation["evidence"],
@@ -349,9 +350,63 @@ class BusinessGraphStore:
         result.update(revision=row["revision"], lifecycle=row["lifecycle"], created_at=row["created_at"])
         return result
 
-    def upsert(self, relation: dict) -> dict:
+    @staticmethod
+    def _case_state(connection, case_id: str):
+        row = connection.execute("SELECT * FROM observations WHERE case_id=? ORDER BY revision DESC LIMIT 1",
+                                 (case_id,)).fetchone()
+        if row is None:
+            return None, [], ""
+        supports = [dict(item) for item in connection.execute(
+            "SELECT fact_id,lifecycle FROM supports WHERE observation_id=? ORDER BY fact_id", (row["id"],))]
+        token = _digest([row["id"], row["lifecycle"], supports])
+        return row, supports, token
+
+    def get_case(self, case_key: str, *, scope_id: str | None = None, environment="development") -> dict:
+        """Read a complete latest case, including withdrawn supports, for explicit replacement."""
+        scope, environment = namespace(scope_id or self.scope, environment)
+        case_key = _text(case_key)
+        case_id = _digest([scope, environment, case_key])
+        with self._transaction() as connection:
+            row, supports, token = self._case_state(connection, case_id)
+            result = {"available": True, "source": "local_diagnostic_cache", "scope_id": scope,
+                      "environment": environment, "case_key": case_key, "case_id": case_id,
+                      "found": row is not None, "case_snapshot": None,
+                      "snapshot_token": token, "must_reverify_current_published_copy": True,
+                      "graph_revision": int(connection.execute("SELECT value FROM meta WHERE key='revision'").fetchone()[0])}
+            if row is None:
+                return result
+            observation = json.loads(row["body"])
+            if observation["legacy"]:
+                relation = {key: value for key, value in observation["legacy"].items() if key in RELATION_FIELDS}
+                fact_aliases = {}
+            else:
+                # Short local IDs reduce the size of the replacement payload.
+                aliases = {item["id"]: f"e{index}" for index, item in enumerate(observation["entities"])}
+                fact_aliases = {item["id"]: f"f{index}" for index, item in enumerate(observation["facts"])}
+                relation = {"format_version": 3, **{key: observation[key] for key in
+                            ("scope_id", "environment", "case_key", "conclusion", "status", "evidence")},
+                            "entities": [{**item, "id": aliases[item["id"]]} for item in observation["entities"]],
+                            "facts": [{**item, "id": fact_aliases[item["id"]], "source": aliases[item["source"]],
+                                       "target": aliases[item["target"]]} for item in observation["facts"]]}
+            result["case_snapshot"] = {"complete": True, "replacement_safe": bool(observation["legacy"]) or not observation["unresolved"],
+                "observation_id": row["id"], "revision": row["revision"], "lifecycle": row["lifecycle"],
+                "relation": relation, "unresolved": observation["unresolved"],
+                "supports": [{**item, "replacement_fact_id": fact_aliases.get(item["fact_id"])} for item in supports]}
+            if (len(_encoded(result)) > MAX_RESPONSE_BYTES or
+                    not observation["legacy"] and len(_encoded(relation)) > MAX_OBSERVATION_BYTES):
+                # A missing/partial snapshot must never be mistaken for an absent case.
+                raise BusinessLogicGraphError("GRAPH_CASE_SNAPSHOT_TOO_LARGE")
+            return result
+
+    def upsert(self, relation: dict, *, expected_case_snapshot: str | None = None) -> dict:
         normalized = normalize_v3(relation, self.scope) if isinstance(relation, dict) and "format_version" in relation else adapt_legacy(relation, self.scope)
+        if expected_case_snapshot is not None and expected_case_snapshot != "":
+            _hash(expected_case_snapshot)
         with self._transaction(write=True) as connection:
+            if expected_case_snapshot is not None:
+                _, _, token = self._case_state(connection, normalized["case_id"])
+                if token != expected_case_snapshot:
+                    raise GraphValidationError("GRAPH_CASE_SNAPSHOT_CHANGED")
             result = self._put(connection, normalized)
             result["graph_revision"] = int(connection.execute("SELECT value FROM meta WHERE key='revision'").fetchone()[0])
             if len(_encoded(result)) > MAX_RESPONSE_BYTES:
@@ -386,7 +441,12 @@ class BusinessGraphStore:
 
     def search(self, *, query=None, action=None, page=None, table=None, field=None, status=None,
                environment="development", limit=20, relation_id=None, current_published_designs=None,
-               current_evidence_fingerprints=None, scope_id=None) -> dict:
+               current_evidence_fingerprints=None, scope_id=None, case_key=None) -> dict:
+        if case_key is not None:
+            if any(value is not None for value in (query, action, page, table, field, status, relation_id,
+                                                  current_published_designs, current_evidence_fingerprints)):
+                raise GraphValidationError("GRAPH_EXACT_CASE_FILTER_CONFLICT")
+            return self.get_case(case_key, scope_id=scope_id, environment=environment)
         scope, environment = namespace(scope_id or self.scope, environment)
         if (type(limit) is not int or not 1 <= limit <= 50 or
                 status is not None and status not in CONFIRMED_STATUSES | LIFECYCLE_STATUSES):

@@ -94,6 +94,106 @@ class BusinessGraphTests(unittest.TestCase):
         with closing(sqlite3.connect(self.store.path)) as connection:
             self.assertEqual(connection.execute("SELECT COUNT(*) FROM supports WHERE lifecycle='stale'").fetchone()[0], 1)
 
+    def test_exact_case_snapshot_roundtrips_v3_and_v2_fixtures(self):
+        fixtures = Path(__file__).parent / "fixtures"
+        samples = [json.loads((fixtures / "business_graph_cases.json").read_text(encoding="utf-8"))[0],
+                   json.loads((fixtures / "business_logic_graph_training.json").read_text(encoding="utf-8"))]
+        for raw in samples:
+            with self.subTest(format=raw.get("format_version", 2)):
+                saved = self.store.upsert(raw)
+                case_key = raw.get("case_key", saved["relation"]["relation_id"])
+                snapshot = self.store.search(case_key=case_key, scope_id=raw.get("scope_id", "test"))
+                self.assertTrue(snapshot["found"])
+                if raw.get("format_version") == 3:
+                    self.assertEqual(self.store.search(scope_id=raw["scope_id"])["relations"][0]["case_key"], case_key)
+                case = snapshot["case_snapshot"]
+                self.assertTrue(case["complete"])
+                self.assertTrue(case["replacement_safe"])
+                self.assertTrue(all(support["lifecycle"] == "active" for support in case["supports"]))
+                result = self.store.upsert(case["relation"], expected_case_snapshot=snapshot["snapshot_token"])
+                self.assertTrue(result["idempotent"])
+
+    def test_case_replacement_preserves_sibling_fact_and_independent_evidence(self):
+        raw = observation("two-branches")
+        sibling = observation("two-branches", "A", "C")
+        raw["entities"].append(sibling["entities"][1])
+        raw["facts"].append({**sibling["facts"][0], "id": "sibling"})
+        self.store.upsert(raw)
+        self.store.upsert(observation("independent"))
+        original = normalize_v3(raw, "test")
+        original_ids = {fact["id"] for fact in original["facts"]}
+        snapshot = self.store.search(case_key="two-branches")
+        replacement = snapshot["case_snapshot"]["relation"]
+        entity_ids = {item["key"]["column"]: item["id"] for item in replacement["entities"]}
+        changed = next(fact for fact in replacement["facts"] if fact["target"] == entity_ids["B"])
+        changed["mapping"]["fingerprint"] = "d" * 64
+        changed["label"] = "Corrected confirmed mapping"
+        saved = self.store.upsert(replacement, expected_case_snapshot=snapshot["snapshot_token"])
+        self.assertTrue(saved["written"])
+        graph = self.store.get_graph(projection="data")
+        edges = {edge["id"]: edge for edge in graph["edges"]}
+        self.assertEqual(len(edges), 3)
+        self.assertTrue(original_ids <= edges.keys())
+        self.assertTrue(all(edge["support_count"] == 1 for edge in edges.values()))
+        updated = self.store.search(case_key="two-branches")["case_snapshot"]
+        self.assertEqual(len(updated["relation"]["facts"]), 2)
+        self.assertTrue(all(support["lifecycle"] == "active" for support in updated["supports"]))
+
+    def test_stale_case_snapshot_rejects_all_changes_atomically(self):
+        first = observation("concurrent")
+        self.store.upsert(first)
+        stale = self.store.search(case_key="concurrent")
+        newer = copy.deepcopy(first)
+        newer["conclusion"] = "Concurrent verified correction"
+        self.store.upsert(newer, expected_case_snapshot=stale["snapshot_token"])
+        before = self.store.search(case_key="concurrent")
+        with self.assertRaisesRegex(GraphValidationError, "GRAPH_CASE_SNAPSHOT_CHANGED"):
+            self.store.upsert(stale["case_snapshot"]["relation"], expected_case_snapshot=stale["snapshot_token"])
+        self.assertEqual(before, self.store.search(case_key="concurrent"))
+
+    def test_snapshot_detects_withdrawal_and_includes_latest_inactive_case(self):
+        saved = self.store.upsert(observation())
+        before = self.store.search(case_key="case")
+        self.store.invalidate(saved["relation"]["relation_id"], reason="user_confirmed_incorrect")
+        after = self.store.search(case_key="case")
+        self.assertTrue(after["found"])
+        self.assertNotEqual(before["snapshot_token"], after["snapshot_token"])
+        self.assertEqual(after["case_snapshot"]["lifecycle"], "invalidated")
+        self.assertEqual({support["lifecycle"] for support in after["case_snapshot"]["supports"]}, {"invalidated"})
+        with self.assertRaisesRegex(GraphValidationError, "GRAPH_CASE_SNAPSHOT_CHANGED"):
+            self.store.upsert(before["case_snapshot"]["relation"], expected_case_snapshot=before["snapshot_token"])
+
+    def test_exact_case_absence_is_namespaced_and_creation_can_be_guarded(self):
+        empty = self.store.search(case_key="case")
+        self.assertFalse(empty["found"])
+        self.assertIsNone(empty["case_snapshot"])
+        self.assertEqual(empty["snapshot_token"], "")
+        self.store.upsert(observation(), expected_case_snapshot="")
+        self.assertFalse(self.store.search(case_key="case", environment="production")["found"])
+        self.assertFalse(self.store.search(case_key="case", scope_id="other")["found"])
+        with self.assertRaisesRegex(GraphValidationError, "GRAPH_CASE_SNAPSHOT_CHANGED"):
+            self.store.upsert(observation(), expected_case_snapshot="")
+
+    def test_exact_case_never_silently_truncates_or_ignores_other_filters(self):
+        self.store.upsert(observation())
+        with self.assertRaisesRegex(GraphValidationError, "GRAPH_EXACT_CASE_FILTER_CONFLICT"):
+            self.store.search(case_key="case", query="unrelated")
+        with patch("gxp_core.business_graph_store.MAX_RESPONSE_BYTES", 1):
+            with self.assertRaisesRegex(BusinessLogicGraphError, "GRAPH_CASE_SNAPSHOT_TOO_LARGE"):
+                self.store.search(case_key="case")
+        with patch("gxp_core.business_graph_store.MAX_OBSERVATION_BYTES", 1):
+            with self.assertRaisesRegex(BusinessLogicGraphError, "GRAPH_CASE_SNAPSHOT_TOO_LARGE"):
+                self.store.search(case_key="case")
+
+    def test_unresolved_identity_blocks_automatic_snapshot_replacement(self):
+        raw = observation()
+        del raw["entities"][0]["key"]["owner"]
+        self.store.upsert(raw)
+        case = self.store.search(case_key="case")["case_snapshot"]
+        self.assertTrue(case["complete"])
+        self.assertFalse(case["replacement_safe"])
+        self.assertTrue(case["unresolved"])
+
     def test_dependency_set_invalidates_only_affected_fact(self):
         raw = observation()
         extra = copy.deepcopy(raw["facts"][0])
@@ -103,10 +203,17 @@ class BusinessGraphTests(unittest.TestCase):
         proof.update(id="other-code", dependencies=[{"kind": "source", "key": "unrelated", "version": "v1"}])
         raw["evidence"].append(proof)
         self.store.upsert(raw)
+        snapshot = self.store.search(case_key="case")
         change = observation("new", "X", "Y", "v2")
         change["evidence"][0]["dependencies"][0]["key"] = "mapping-case"
         self.store.upsert(change)
         self.assertEqual({edge["kind"] for edge in self.store.get_graph()["edges"]}, {"associated_with", "flows_to"})
+        current = self.store.search(case_key="case")
+        self.assertEqual(current["case_snapshot"]["lifecycle"], "active")
+        self.assertEqual({item["lifecycle"] for item in current["case_snapshot"]["supports"]}, {"active", "stale"})
+        self.assertNotEqual(snapshot["snapshot_token"], current["snapshot_token"])
+        with self.assertRaisesRegex(GraphValidationError, "GRAPH_CASE_SNAPSHOT_CHANGED"):
+            self.store.upsert(snapshot["case_snapshot"]["relation"], expected_case_snapshot=snapshot["snapshot_token"])
 
     def test_identity_namespace_aliases_and_boundaries(self):
         raw = observation()
