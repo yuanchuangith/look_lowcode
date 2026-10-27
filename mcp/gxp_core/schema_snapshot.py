@@ -14,6 +14,9 @@ from typing import Any
 
 from .cpm_runner import _FileLock
 from .db import ReadOnlyDatabase
+from .evidence_guidance import guidance
+from .sql_guard import validate_identifier
+from .telemetry import stage
 from .policy_client import PolicyUnavailable, RelationPolicyClient, relation_id
 from .schema_config import (
     SchemaSnapshotConfig,
@@ -473,8 +476,24 @@ class SchemaSnapshotManager:
         target_table: str | None = None,
         target_columns: list[str] | None = None,
         force_live: bool = False,
+        live_timeout_ms: int = 30000,
     ) -> dict[str, Any]:
-        self.ensure_fresh()
+        if type(live_timeout_ms) is not int or not 100 <= live_timeout_ms <= 30000:
+            raise ValueError("live_timeout_ms must be 100..30000")
+        if force_live and target_table and target_columns:
+            return self._resolve_explicit_live(source_table, source_columns, target_table, target_columns, live_timeout_ms)
+        try:
+            self.ensure_fresh()
+        except Exception:
+            arguments = {"source_table": source_table, "source_columns": source_columns,
+                         "target_table": target_table, "target_columns": target_columns, "force_live": True}
+            next_read = ({"tool": "resolve_table_relation", "arguments": arguments}
+                         if target_table and target_columns else
+                         {"tool": "describe_table", "arguments": {"table": target_table or source_table}})
+            return {"status": "unresolved", "evidence_layer": "尚未确认", "reason": "schema_refresh_failed",
+                    "next_read": next_read, **guidance("schema_refresh_failed", "relationship_resolution",
+                    next_read=next_read, can_continue=("current_design_analysis",),
+                    stop_reason="explicit_target_required" if not target_table or not target_columns else None)}
         try:
             policy = self.policy.sync()
         except PolicyUnavailable as exc:
@@ -542,6 +561,71 @@ class SchemaSnapshotManager:
                     "policy_revision": current_policy["revision"]}
         return {"status": "unresolved", "evidence_layer": "尚未确认", "reason": state, "matches": len(live), "attempts": attempts}
 
+    def _resolve_explicit_live(self, source_table, source_columns, target_table, target_columns, live_timeout_ms):
+        for table in (source_table, target_table):
+            validate_identifier(table, "table")
+        for columns in (source_columns, target_columns):
+            if not isinstance(columns, list) or not columns or len(set(columns)) != len(columns):
+                raise ValueError("Columns must be a nonempty list of distinct identifiers")
+            for column in columns:
+                validate_identifier(column, "column")
+        if len(source_columns) != len(target_columns):
+            raise ValueError("Source and target columns must have the same length")
+        rid = relation_id(self.config.policy_scope_id, source_table, source_columns, target_table, target_columns)
+        common = {"evidence_layer": "尚未确认", "verification_scope": "explicit_target",
+                  "persisted": False, "candidate_group_complete": False}
+
+        def unresolved(reason):
+            return {**common, "status": "unresolved", "reason": reason,
+                    **guidance(reason, "specified_relationship", can_continue=("current_design_analysis",),
+                               stop_reason=reason, attempted=("explicit_live",))}
+
+        try:
+            policy = self.policy.sync()
+        except PolicyUnavailable:
+            return unresolved("policy_unavailable")
+        if rid in policy["rejections"]:
+            return {**common, "status": "rejected", "reason": "rejected_by_policy",
+                    "relation_id": rid, "policy_revision": policy["revision"]}
+        deadline = time.monotonic() + min(live_timeout_ms / 1000, float(self.config.refresh_timeout_seconds))
+        try:
+            with stage("schema.live_metadata"):
+                source = self.repository.load_table_metadata(source_table, deadline=deadline)
+                target = source if source_table == target_table else self.repository.load_table_metadata(target_table, deadline=deadline)
+            if not source or not target:
+                return unresolved("unknown_table")
+            source_map, target_map = _column_map(source), _column_map(target)
+            if target_columns not in unique_keys(target, strict=True):
+                return unresolved("target_unique_key_not_proven")
+            if any(left not in source_map or right not in target_map or
+                   not columns_compatible(source_map[left], target_map[right])
+                   for left, right in zip(source_columns, target_columns)):
+                return unresolved("columns_incompatible_or_missing")
+            with stage("schema.live_validation"):
+                evidence = self.repository.validate_relation(source_table, source_columns, target_table, target_columns,
+                    min_distinct_values=self.config.min_distinct_values, deadline=deadline)
+        except TimeoutError:
+            return unresolved("query_timeout")
+        except Exception:
+            return unresolved("verification_error")
+        attempt = {"source_table": source_table, "source_columns": source_columns,
+                   "target_table": target_table, "target_columns": target_columns, "relation_id": rid,
+                   "policy_revision_at_validation": int(policy["revision"]), "policy_storage": policy.get("storage"),
+                   "evidence": evidence, "status": evidence["reason"]}
+        try:
+            current_policy = self.policy.sync()
+        except PolicyUnavailable:
+            return unresolved("policy_unavailable")
+        _apply_current_policy([attempt], current_policy)
+        if attempt["status"] in {"rejected_by_policy", "policy_changed"}:
+            return unresolved(attempt["status"])
+        if time.monotonic() >= deadline:
+            return unresolved("query_timeout")
+        if not evidence.get("passed"):
+            return {**unresolved(evidence["reason"]), "attempts": [attempt]}
+        return {**common, "status": "live_verified", "evidence_layer": "实时数据库验证", "relation": attempt,
+                "policy_revision": current_policy["revision"]}
+
     def reject(self, relation: str, reason_code: str = "user_confirmed_incorrect") -> dict[str, Any]:
         result = self.policy.reject(relation, reason_code)
         return {"evidence_layer": "本机用户否决", **result}
@@ -587,11 +671,17 @@ def resolve_table_relation(
     target_table: str | None = None,
     target_columns: list[str] | None = None,
     force_live: bool = False,
+    live_timeout_ms: int = 30000,
 ) -> dict[str, Any]:
-    """Resolve a relationship through policy, a fresh verified snapshot, or live aggregate checks."""
+    """Resolve through policy/snapshot/live checks. Explicit source+target columns with force_live
+    bypass full refresh; live_timeout_ms (100..30000) bounds query work on this narrow path only,
+    not connection setup/pool waits/cleanup. Automatic fallback also needs an outer wall-clock
+    timeout; otherwise propose this read. It proves only the specified relationship, never
+    global uniqueness; no verification is persisted.
+    """
     return SchemaSnapshotManager().resolve(
         source_table, source_columns,
-        target_table=target_table, target_columns=target_columns, force_live=force_live,
+        target_table=target_table, target_columns=target_columns, force_live=force_live, live_timeout_ms=live_timeout_ms,
     )
 
 

@@ -11,6 +11,10 @@
 
 ## 本机否决与恢复
 
+完整源表/列与目标表/列明确时，`force_live=true` 直接读取这两张表的实时结构和聚合数据，不依赖全量快照刷新。仍检查完整唯一键、类型、数据阈值和验证前后的本机否决；函数索引、缺成员或前缀索引不能替代完整目标唯一键证据。返回 `verification_scope=explicit_target`、`candidate_group_complete=false`、`persisted=false`，不自动纳入可信关系快照。其他参数组合保留完整候选流程。刷新失败按 [有限补查](diagnostic-fallback.md) 读取 `next_read`，不反复全库刷新。
+
+`live_timeout_ms` 是查询工作预算，不是整个 MCP 调用的墙钟保证。作为自动兜底时还需外层可控超时；没有该能力则仅返回指定关系的补查建议。
+
 - 每次使用推断关系前检查本机否决记录，不访问策略服务器。命中 `rejected` 立即停止，不重验、不重建，直到显式恢复；记录不可读时只展示 `declared_fk`，推断关系标“尚未确认”。
 - 只有用户明确指出关系错误，且当前回答已有该 `relation_id`，才 `reject_table_relation`。普通质疑、待确认或查询失败不永久否决。
 - 否决只在本机保存 relation ID、标准原因码和审计，不上传或跨机同步。首次只导入本机同 scope 旧缓存，不下载服务器历史。

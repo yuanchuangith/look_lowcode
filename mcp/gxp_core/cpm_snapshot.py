@@ -6,6 +6,7 @@ from typing import Any, Iterable
 
 from .cpm_config import CpmConfig, load_cpm_config
 from .cpm_runner import CpmRefreshManager
+from .evidence_guidance import guidance
 
 
 MAX_LIMIT = 100
@@ -98,17 +99,35 @@ def _refresh_context(manager: CpmRefreshManager, refresh: dict[str, Any] | None)
         "cli_version": (refresh or {}).get("cli_version") or status.get("cli_version"),
         "refresh_mode": (refresh or {}).get("refresh_mode"),
         "failures": list((refresh or {}).get("failures") or status.get("failures") or []),
+        "stale": bool(status.get("stale", True)) if refresh is None else not bool(refresh.get("ok")),
+        "evidence_scope": "snapshot_candidates_only",
     }
 
 
 def _prepare(refresh_if_stale: bool, page_identifier: str | None = None) -> tuple[CpmConfig, CpmRefreshManager, dict[str, Any]]:
     config = load_cpm_config()
     manager = CpmRefreshManager(config)
-    refresh = manager.ensure_fresh(page_identifier) if refresh_if_stale else None
+    try:
+        refresh = manager.ensure_fresh(page_identifier) if refresh_if_stale else None
+    except Exception:
+        refresh = {"ok": False, "error": {"code": "REFRESH_FAILED"}}
     if refresh and not refresh.get("ok"):
         error = refresh.get("error") or {}
-        raise SnapshotError(str(error.get("code", "REFRESH_FAILED")), str(error.get("message", "CPM 快照刷新失败")))
-    return config, manager, _refresh_context(manager, refresh)
+        # A failed refresh never replaces the previous usable snapshot. Validate
+        # it before exposing it as explicitly stale navigation clues.
+        _snapshot_root(config)
+        context = _refresh_context(manager, None)
+        context.update(stale=True, stale_reason=str(error.get("code") or "REFRESH_FAILED"),
+                       current_runtime_verified=False)
+        context.update(guidance("cpm_refresh_failed", "current_platform_state",
+            can_continue=("stale_candidate_navigation", "current_design_analysis"),
+            stop_reason="current_platform_evidence_required", attempted=("refresh", "stale_snapshot")))
+        return config, manager, context
+    context = _refresh_context(manager, refresh)
+    if context["stale"]:
+        context.update(current_runtime_verified=False, **guidance("stale_snapshot", "current_platform_state",
+            can_continue=("stale_candidate_navigation",), stop_reason="current_platform_evidence_required"))
+    return config, manager, context
 
 
 def cpm_snapshot_status() -> dict[str, Any]:

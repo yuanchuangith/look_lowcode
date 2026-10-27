@@ -8,18 +8,35 @@ import json
 
 from .canvas_budget import payload_size, response_limit
 from .source_budget import bounded_payload
+from .evidence_guidance import guidance
 
 
 def _json(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2)
 
 
+def _continuation_guidance(result, tool, collection):
+    if not tool or result["evidence_complete"]:
+        return
+    arguments = {"response_detail": result["response_detail"]}
+    cursor = result["next_cursor"]
+    if not cursor and result["response_detail"] == "summary":
+        arguments["response_detail"] = "full"
+        cursor = next((item.get("detail_cursor") for item in result.get(collection, []) if item.get("detail_cursor")), None)
+    if cursor:
+        arguments["cursor"] = cursor
+    next_read = {"tool": tool, "arguments": arguments, "reuse_original_arguments": True} if cursor or result["response_detail"] == "summary" else None
+    result.update(guidance("DIAGNOSTIC_EVIDENCE_INCOMPLETE", "diagnostic_completeness", next_read=next_read,
+                           can_continue=("returned_locations_and_counts",), stop_reason="required_details_unread"))
+
+
 def diagnostic_page(records, *, identity, envelope, response_detail="summary", max_output_bytes=16384,
-                    cursor=None, limit=10, summarize=lambda item: item, collection="records"):
+                    cursor=None, limit=10, summarize=lambda item: item, collection="records", snapshot_fingerprint=None,
+                    continuation_tool=None):
     response_limit(max_output_bytes)
     if response_detail not in {"summary", "full"} or type(limit) is not int or not 1 <= limit <= 50:
         raise ValueError("response_detail must be summary/full; limit must be 1..50")
-    snapshot = hashlib.sha256(_json(identity).encode("utf-8")).hexdigest()
+    snapshot = snapshot_fingerprint or hashlib.sha256(_json(identity).encode("utf-8")).hexdigest()
 
     def token(offset, part=0, detail=response_detail, envelope_part=-1):
         state = [2, snapshot, detail, offset, part, envelope_part]
@@ -80,6 +97,7 @@ def diagnostic_page(records, *, identity, envelope, response_detail="summary", m
         more = envelope_part < len(envelope_text)
         value_page["continuation_complete"] = not more
         result.update(has_more=more, next_cursor=token(offset, envelope_part=envelope_part) if more else None)
+        _continuation_guidance(result, continuation_tool, collection)
         if payload_size(result) > max_output_bytes:
             raise ValueError("DIAGNOSTIC_ENVELOPE_TOO_LARGE")
         return result
@@ -119,6 +137,7 @@ def diagnostic_page(records, *, identity, envelope, response_detail="summary", m
                   next_cursor=token(offset, part, envelope_part=envelope_part) if more else None,
                   response_complete=complete,
                   evidence_complete=response_detail == "full" and complete)
+    _continuation_guidance(result, continuation_tool, collection)
     if payload_size(result) > max_output_bytes:
         raise ValueError("DIAGNOSTIC_ENVELOPE_TOO_LARGE")
     return result

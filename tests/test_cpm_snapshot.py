@@ -54,6 +54,25 @@ class CpmSnapshotTests(unittest.TestCase):
         self.assertEqual("/a", inspected["page"]["route"])
         self.assertEqual("cpm_snapshot", inspected["source"])
 
+    def test_failed_refresh_returns_only_explicitly_stale_candidates(self):
+        with patch("gxp_core.cpm_snapshot.CpmRefreshManager") as manager:
+            manager.return_value.ensure_fresh.return_value = {"ok": False, "error": {"code": "TOKEN_INVALID"}}
+            manager.return_value.snapshot_status.return_value = {"stale": True, "refreshed_at": "old"}
+            result = search_platform_snapshot("DataFilter", ["components"])
+            self.assertTrue(result["ok"])
+            self.assertTrue(result["stale"])
+            self.assertEqual("TOKEN_INVALID", result["stale_reason"])
+            self.assertFalse(result["current_runtime_verified"])
+            self.assertEqual("snapshot_candidates_only", result["evidence_scope"])
+            self.assertEqual(1, manager.return_value.ensure_fresh.call_count)
+
+    def test_failed_refresh_without_usable_snapshot_remains_an_error(self):
+        (self.snapshot / "manifest.json").unlink()
+        with patch("gxp_core.cpm_snapshot.CpmRefreshManager") as manager:
+            manager.return_value.ensure_fresh.return_value = {"ok": False, "error": {"code": "REFRESH_FAILED"}}
+            result = search_platform_snapshot("DataFilter")
+            self.assertFalse(result["ok"])
+
     def test_knowledge_rejects_path_traversal_and_reads_allowlisted_component(self) -> None:
         denied = get_cpm_knowledge("component", "../DataFilter")
         self.assertFalse(denied["ok"])

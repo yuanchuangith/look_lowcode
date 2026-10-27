@@ -17,6 +17,7 @@ from .service import GxpReadonlyService
 from .source_hints import BACKEND_STACK_FRAME
 from .source_index import bounded_result, ensure_source_index, load_index_file, refresh_source_index as _refresh_source_index, source_index_status, source_read_view, source_index_generation
 from .source_index import SourceSnapshotChanged, verified_source_text
+from .evidence_guidance import guidance
 
 
 MODEL_TERM = re.compile(r"\b(?:props\.)?([A-Za-z_$][\w$]*(?:Model|model|Dataset|dataset)[A-Za-z0-9_$]*)\b")
@@ -48,13 +49,21 @@ def _repository_contract(status: dict[str, Any], layers: Iterable[str]) -> dict[
 
 def _base(status: dict[str, Any], layers: Iterable[str]) -> dict[str, Any]:
     selected_layers = tuple(layers)
-    return {
+    result = {
         "repository": _repository_contract(status, selected_layers),
         "index": _index_contract(status, selected_layers),
         "evidence": [],
         "runtime_verified": False,
         "unresolved": [],
     }
+    repositories = status.get("repositories") or {}
+    failed = [layer for layer in selected_layers if (repositories.get(layer) or {}).get("stale", True)
+              or (repositories.get(layer) or {}).get("parse_incomplete")]
+    if failed:
+        healthy = [layer for layer in selected_layers if layer not in failed]
+        result.update(guidance("source_layer_unavailable", failed,
+            can_continue=healthy + ["exact_anchor_live_search"], stop_reason="current_source_evidence_required"))
+    return result
 
 
 def _source_layers(*layers: str):

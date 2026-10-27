@@ -12,6 +12,7 @@ from .canvas_references import select_groups
 from .canvas_budget import canvas_payload, node_value_page, response_limit
 from .canvas_evidence import scoped_csharp
 from .diagnostic_output import diagnostic_page, filter_summary, exception_summary
+from .diagnostic_cache import diagnostic_snapshot
 from .call_flow import expand_calls
 from .business_logic_graph import BusinessLogicGraphError, GraphValidationError
 from .business_graph_store import BusinessGraphStore as BusinessLogicGraphStore
@@ -682,11 +683,22 @@ class GxpReadonlyService:
         cursor: str | None = None,
         limit: int = 10,
     ) -> dict[str, Any]:
+        arguments = {"identifier": identifier, "component": component, "version": version,
+                     "include_params": include_params, "design_id": design_id, "at_time": at_time}
+        records, envelope, identity, fingerprint = diagnostic_snapshot(
+            self.repository, "inspect_component_filters", arguments,
+            lambda: self._component_filter_diagnostic(**arguments))
+        return diagnostic_page(records, identity=identity, envelope=envelope,
+            response_detail=response_detail, max_output_bytes=max_output_bytes, cursor=cursor, limit=limit,
+            summarize=filter_summary, collection="writers", snapshot_fingerprint=fingerprint,
+            continuation_tool="inspect_component_filters")
+
+    def _component_filter_diagnostic(self, identifier, component, *, version, include_params, design_id, at_time):
         matches = self.repository.resolve_action(identifier)
         if not matches:
             matches = self.repository.search_actions(identifier)
         if len(matches) != 1:
-            return diagnostic_page([], identity=[identifier, component, matches], envelope={
+            return [], {
                 "identifier": identifier,
                 "component_query": component,
                 "resolution_status": "not_found" if not matches else "ambiguous",
@@ -695,7 +707,7 @@ class GxpReadonlyService:
                 "next_step": (
                     "Select one exact action code or RefId before inspecting component filters."
                 ),
-            }, response_detail=response_detail, max_output_bytes=max_output_bytes, cursor=cursor, limit=limit)
+            }, [identifier, component, matches]
         ref_id = str(matches[0]["ref_id"])
         design = self.repository.load_design(
             ref_id,
@@ -761,9 +773,7 @@ class GxpReadonlyService:
                 "version": design.get("version", version), "design_id": design.get("design_id"),
                 "group": writer.get("group_key"), "node_key": writer.get("node_key"),
                 "value_path": "/paramsValue", "value_offset": 0, "value_limit": 2048}}
-        return diagnostic_page(writers, identity=[identifier, component, version, design_id, at_time, include_params, result, writers],
-            envelope=result, response_detail=response_detail, max_output_bytes=max_output_bytes,
-            cursor=cursor, limit=limit, summarize=filter_summary, collection="writers")
+        return writers, result, [identifier, component, version, design_id, at_time, include_params, result, writers]
 
     def compare_designs(self, ref_id: str) -> dict[str, Any]:
         published = self.repository.load_design(
@@ -805,6 +815,16 @@ class GxpReadonlyService:
         response_detail: str = "summary", max_output_bytes: int = 16384,
         cursor: str | None = None, limit: int = 10,
     ) -> dict[str, Any]:
+        arguments = {"text": text, "at_time": at_time, "context_lines": context_lines}
+        records, envelope, identity, fingerprint = diagnostic_snapshot(
+            getattr(self, "repository", None), "trace_dynamic_exception", arguments,
+            lambda: self._exception_diagnostic(**arguments))
+        return diagnostic_page(records, identity=identity, envelope=envelope,
+            response_detail=response_detail, max_output_bytes=max_output_bytes, cursor=cursor, limit=limit,
+            summarize=exception_summary, collection="runtime_published_candidates", snapshot_fingerprint=fingerprint,
+            continuation_tool="trace_dynamic_exception")
+
+    def _exception_diagnostic(self, text, *, at_time, context_lines):
         result = self.diagnostics.trace_dynamic_exception(
             text, at_time=at_time, context_lines=context_lines
         )
@@ -817,9 +837,7 @@ class GxpReadonlyService:
             if not action.get("runtime_published_candidates"):
                 records.append({"action": action["action"], "runtime_published_candidates": [],
                                 "current_copy_sync": action.get("current_copy_sync")})
-        return diagnostic_page(records, identity=[text, at_time, context_lines, result, records], envelope=result,
-            response_detail=response_detail, max_output_bytes=max_output_bytes, cursor=cursor, limit=limit,
-            summarize=exception_summary, collection="runtime_published_candidates")
+        return records, result, [text, at_time, context_lines, result, records]
 
     def diagnose_codex_input(
         self, text: str, *, at_time: str | None = None, context: dict[str, Any] | None = None

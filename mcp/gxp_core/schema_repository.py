@@ -113,6 +113,25 @@ class SchemaMetadataRepository:
         if setter is not None:
             setter(timeout_ms)
 
+    def load_table_metadata(self, table: str, *, deadline: float | None = None) -> dict[str, Any] | None:
+        """Read exactly one table, sharing a deadline across all metadata queries."""
+        validate_identifier(table, "table")
+        with self.database.session(timeout_ms=self.query_timeout_ms) as session:
+            self._prepare_query(session, deadline)
+            rows, truncated = session.query(
+                "SELECT TABLE_NAME, TABLE_TYPE, ENGINE, TABLE_COLLATION, TABLE_COMMENT "
+                "FROM information_schema.TABLES WHERE TABLE_SCHEMA=%(schema)s AND TABLE_NAME=%(table)s",
+                {"schema": self.database.config.database, "table": table}, max_rows=2,
+            )
+        if truncated or len(rows) > 1:
+            raise ValueError("Ambiguous table metadata")
+        if not rows:
+            return None
+        result = _row(rows[0])
+        result["columns"] = self._columns(table, deadline=deadline)
+        result["indexes"] = self._indexes(table, deadline=deadline)
+        return result
+
     def load_schema(self, *, deadline: float | None = None) -> dict[str, Any]:
         database_name = self.database.config.database
         tables: list[dict[str, Any]] = []
@@ -556,12 +575,16 @@ ORDER BY tc.CONSTRAINT_NAME
         }
 
 
-def unique_keys(table: dict[str, Any]) -> list[list[str]]:
+def unique_keys(table: dict[str, Any], *, strict: bool = False) -> list[list[str]]:
     grouped: dict[str, list[tuple[int, str]]] = defaultdict(list)
+    invalid = set()
     for index in table.get("indexes", []):
+        if strict and (not index.get("column_name") or index.get("sub_part") is not None):
+            invalid.add(str(index["index_name"]))
         if int(index.get("non_unique") or 0) == 0 and index.get("column_name"):
             grouped[str(index["index_name"])].append((int(index.get("seq_in_index") or 0), str(index["column_name"])))
-    return [[column for _, column in sorted(items)] for items in grouped.values()]
+    return [[column for _, column in sorted(items)] for name, items in grouped.items()
+            if not strict or name not in invalid and sorted(seq for seq, _ in items) == list(range(1, len(items) + 1))]
 
 
 def generate_candidates(schema: dict[str, Any], *, max_targets_per_source: int = 3) -> list[dict[str, Any]]:

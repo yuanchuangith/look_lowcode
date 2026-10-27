@@ -5,7 +5,8 @@ import json
 from typing import Any
 
 
-PRIORITY_FIELDS = ("status", "errors", "error", "unresolved", "contract_status", "runtime_verified", "index", "repository")
+PRIORITY_FIELDS = ("status", "errors", "error", "unresolved", "contract_status", "runtime_verified", "index", "repository",
+                   "next_read", "evidence_gaps", "fallback")
 
 
 def bounded_payload(result: dict[str, Any], limit: int) -> dict[str, Any]:

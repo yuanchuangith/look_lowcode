@@ -1,0 +1,245 @@
+{
+  "kind": "synthetic_local_only",
+  "baseline_ref": "4986e2c3b71e74911aa6671a0061863e3c3b15d3",
+  "round_count": 5,
+  "python": "3.12.7 | packaged by Anaconda, Inc. | (main, Oct  4 2024, 13:17:27) [MSC v.1929 64 bit (AMD64)]",
+  "platform": "Windows-11-10.0.22000-SP0",
+  "scope": "Query-only in-memory DB fixture: 600 canvas writers, 8 published history rows plus draft. Fresh service/repository per call; no credentials, business DB, configured source repositories or network.",
+  "comparison": "Exact canonical first/continuation JSON including evidence and v2 cursors; only additive transport evidence_gaps/fallback removed. Startup and fixture creation excluded.",
+  "limits": "No real SQL latency/permissions, connection setup or model end-to-end measurement. Serialized cache bytes are not a Python heap hard cap.",
+  "medians_seconds": {
+    "baseline": {
+      "filter": {
+        "cold_seconds": 0.18661199999041855,
+        "hot_seconds": 0.18610810005338863
+      },
+      "exception": {
+        "cold_seconds": 0.3467235999996774,
+        "hot_seconds": 0.33940190001158044
+      }
+    },
+    "candidate": {
+      "filter": {
+        "cold_seconds": 0.18561109999427572,
+        "hot_seconds": 0.0020835999748669565
+      },
+      "exception": {
+        "cold_seconds": 0.3544343000394292,
+        "hot_seconds": 0.008028899959754199
+      }
+    }
+  },
+  "candidate_over_baseline": {
+    "filter": {
+      "cold_seconds": 0.9946364649851337,
+      "hot_seconds": 0.01119564368380117
+    },
+    "exception": {
+      "cold_seconds": 1.0222387516735492,
+      "hot_seconds": 0.023656025377230508
+    }
+  },
+  "acceptance_passed": true,
+  "rounds": [
+    {
+      "round": 1,
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "baseline": {
+        "filter": {
+          "cold_seconds": 0.18661199999041855,
+          "hot_seconds": 0.18810460000531748,
+          "cold_body_reads": 1,
+          "hot_body_reads": 1,
+          "semantic_sha256": "aed13cc938d7f4793d78c615b7ec35364c1a68482aef205cda7156a2c4a72148"
+        },
+        "exception": {
+          "cold_seconds": 0.3467235999996774,
+          "hot_seconds": 0.3383056999882683,
+          "cold_body_reads": 22,
+          "hot_body_reads": 22,
+          "semantic_sha256": "0a316899b66c5539b8d2551a14f9b8faef6789bbfe66023e6b21c1cf054f45e3"
+        }
+      },
+      "candidate": {
+        "filter": {
+          "cold_seconds": 0.2005304000340402,
+          "hot_seconds": 0.002162399992812425,
+          "cold_body_reads": 1,
+          "hot_body_reads": 0,
+          "semantic_sha256": "aed13cc938d7f4793d78c615b7ec35364c1a68482aef205cda7156a2c4a72148"
+        },
+        "exception": {
+          "cold_seconds": 0.5342730999691412,
+          "hot_seconds": 0.007917199982330203,
+          "cold_body_reads": 22,
+          "hot_body_reads": 0,
+          "semantic_sha256": "0a316899b66c5539b8d2551a14f9b8faef6789bbfe66023e6b21c1cf054f45e3"
+        }
+      },
+      "equivalent": true
+    },
+    {
+      "round": 2,
+      "order": [
+        "candidate",
+        "baseline"
+      ],
+      "candidate": {
+        "filter": {
+          "cold_seconds": 0.18581589998211712,
+          "hot_seconds": 0.002516400010790676,
+          "cold_body_reads": 1,
+          "hot_body_reads": 0,
+          "semantic_sha256": "aed13cc938d7f4793d78c615b7ec35364c1a68482aef205cda7156a2c4a72148"
+        },
+        "exception": {
+          "cold_seconds": 0.3544343000394292,
+          "hot_seconds": 0.007850399997550994,
+          "cold_body_reads": 22,
+          "hot_body_reads": 0,
+          "semantic_sha256": "0a316899b66c5539b8d2551a14f9b8faef6789bbfe66023e6b21c1cf054f45e3"
+        }
+      },
+      "baseline": {
+        "filter": {
+          "cold_seconds": 0.18576570000732318,
+          "hot_seconds": 0.18610810005338863,
+          "cold_body_reads": 1,
+          "hot_body_reads": 1,
+          "semantic_sha256": "aed13cc938d7f4793d78c615b7ec35364c1a68482aef205cda7156a2c4a72148"
+        },
+        "exception": {
+          "cold_seconds": 0.3453140000347048,
+          "hot_seconds": 0.3409137999988161,
+          "cold_body_reads": 22,
+          "hot_body_reads": 22,
+          "semantic_sha256": "0a316899b66c5539b8d2551a14f9b8faef6789bbfe66023e6b21c1cf054f45e3"
+        }
+      },
+      "equivalent": true
+    },
+    {
+      "round": 3,
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "baseline": {
+        "filter": {
+          "cold_seconds": 0.18650659994455054,
+          "hot_seconds": 0.18600000004516914,
+          "cold_body_reads": 1,
+          "hot_body_reads": 1,
+          "semantic_sha256": "aed13cc938d7f4793d78c615b7ec35364c1a68482aef205cda7156a2c4a72148"
+        },
+        "exception": {
+          "cold_seconds": 0.3500530999735929,
+          "hot_seconds": 0.3378217999706976,
+          "cold_body_reads": 22,
+          "hot_body_reads": 22,
+          "semantic_sha256": "0a316899b66c5539b8d2551a14f9b8faef6789bbfe66023e6b21c1cf054f45e3"
+        }
+      },
+      "candidate": {
+        "filter": {
+          "cold_seconds": 0.18561109999427572,
+          "hot_seconds": 0.002064200001768768,
+          "cold_body_reads": 1,
+          "hot_body_reads": 0,
+          "semantic_sha256": "aed13cc938d7f4793d78c615b7ec35364c1a68482aef205cda7156a2c4a72148"
+        },
+        "exception": {
+          "cold_seconds": 0.34993850003229454,
+          "hot_seconds": 0.008098800026345998,
+          "cold_body_reads": 22,
+          "hot_body_reads": 0,
+          "semantic_sha256": "0a316899b66c5539b8d2551a14f9b8faef6789bbfe66023e6b21c1cf054f45e3"
+        }
+      },
+      "equivalent": true
+    },
+    {
+      "round": 4,
+      "order": [
+        "candidate",
+        "baseline"
+      ],
+      "candidate": {
+        "filter": {
+          "cold_seconds": 0.18521299998974428,
+          "hot_seconds": 0.0020835999748669565,
+          "cold_body_reads": 1,
+          "hot_body_reads": 0,
+          "semantic_sha256": "aed13cc938d7f4793d78c615b7ec35364c1a68482aef205cda7156a2c4a72148"
+        },
+        "exception": {
+          "cold_seconds": 0.35129800002323464,
+          "hot_seconds": 0.008028899959754199,
+          "cold_body_reads": 22,
+          "hot_body_reads": 0,
+          "semantic_sha256": "0a316899b66c5539b8d2551a14f9b8faef6789bbfe66023e6b21c1cf054f45e3"
+        }
+      },
+      "baseline": {
+        "filter": {
+          "cold_seconds": 0.18826620001345873,
+          "hot_seconds": 0.1861672000377439,
+          "cold_body_reads": 1,
+          "hot_body_reads": 1,
+          "semantic_sha256": "aed13cc938d7f4793d78c615b7ec35364c1a68482aef205cda7156a2c4a72148"
+        },
+        "exception": {
+          "cold_seconds": 0.34746740001719445,
+          "hot_seconds": 0.3447266000439413,
+          "cold_body_reads": 22,
+          "hot_body_reads": 22,
+          "semantic_sha256": "0a316899b66c5539b8d2551a14f9b8faef6789bbfe66023e6b21c1cf054f45e3"
+        }
+      },
+      "equivalent": true
+    },
+    {
+      "round": 5,
+      "order": [
+        "baseline",
+        "candidate"
+      ],
+      "baseline": {
+        "filter": {
+          "cold_seconds": 0.18669649999355897,
+          "hot_seconds": 0.18492699996568263,
+          "cold_body_reads": 1,
+          "hot_body_reads": 1,
+          "semantic_sha256": "aed13cc938d7f4793d78c615b7ec35364c1a68482aef205cda7156a2c4a72148"
+        },
+        "exception": {
+          "cold_seconds": 0.3432116999756545,
+          "hot_seconds": 0.33940190001158044,
+          "cold_body_reads": 22,
+          "hot_body_reads": 22,
+          "semantic_sha256": "0a316899b66c5539b8d2551a14f9b8faef6789bbfe66023e6b21c1cf054f45e3"
+        }
+      },
+      "candidate": {
+        "filter": {
+          "cold_seconds": 0.18325619999086484,
+          "hot_seconds": 0.0020057999645359814,
+          "cold_body_reads": 1,
+          "hot_body_reads": 0,
+          "semantic_sha256": "aed13cc938d7f4793d78c615b7ec35364c1a68482aef205cda7156a2c4a72148"
+        },
+        "exception": {
+          "cold_seconds": 0.3545835000113584,
+          "hot_seconds": 0.008249900012742728,
+          "cold_body_reads": 22,
+          "hot_body_reads": 0,
+          "semantic_sha256": "0a316899b66c5539b8d2551a14f9b8faef6789bbfe66023e6b21c1cf054f45e3"
+        }
+      },
+      "equivalent": true
+    }
+  ]
+}

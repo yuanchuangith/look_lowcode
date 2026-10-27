@@ -71,6 +71,9 @@ class FakeRepository:
     def load_schema(self, **kwargs):
         return json.loads(json.dumps(SCHEMA))
 
+    def load_table_metadata(self, table, **kwargs):
+        return next((item for item in self.load_schema()["tables"] if item["table_name"] == table), None)
+
     def validate_relation(self, *args, **kwargs):
         self.validation_calls += 1
         if self.error:
@@ -185,6 +188,61 @@ class SchemaSnapshotTests(unittest.TestCase):
         )
         self.assertEqual("live_verified", resolved["status"])
         self.assertFalse(resolved["persisted"])
+
+    def test_explicit_live_does_not_refresh_or_persist_snapshot(self):
+        self.manager.ensure_fresh = lambda: self.fail("Full schema must not be refreshed")
+        result = self.manager.resolve("orders", ["user_id"], target_table="users", target_columns=["id"], force_live=True)
+        self.assertEqual("live_verified", result["status"])
+        self.assertEqual("explicit_target", result["verification_scope"])
+        self.assertFalse(result["candidate_group_complete"])
+        self.assertFalse(self.manager.root.exists())
+
+    def test_explicit_live_rejects_non_unique_and_incomplete_target_keys(self):
+        for indexes in ([], [{"index_name": "u", "non_unique": 0, "seq_in_index": 1, "column_name": "id"},
+                            {"index_name": "u", "non_unique": 0, "seq_in_index": 2, "column_name": None}],
+                        [{"index_name": "u", "non_unique": 0, "seq_in_index": 1, "column_name": "id", "sub_part": 3}]):
+            original = self.repository.load_table_metadata
+            def metadata(table, **kwargs):
+                row = original(table, **kwargs)
+                if table == "users":
+                    row["indexes"] = indexes
+                return row
+            self.repository.load_table_metadata = metadata
+            result = self.manager.resolve("orders", ["user_id"], target_table="users", target_columns=["id"], force_live=True)
+            self.assertEqual("target_unique_key_not_proven", result["reason"])
+            self.repository.load_table_metadata = original
+        self.assertEqual(0, self.repository.validation_calls)
+
+    def test_explicit_live_policy_and_timeout_are_never_verified(self):
+        self.policy.available = False
+        result = self.manager.resolve("orders", ["user_id"], target_table="users", target_columns=["id"], force_live=True)
+        self.assertEqual("policy_unavailable", result["reason"])
+        self.assertEqual(0, self.repository.validation_calls)
+        self.policy.available = True
+        self.repository.error = TimeoutError("deadline")
+        result = self.manager.resolve("orders", ["user_id"], target_table="users", target_columns=["id"], force_live=True)
+        self.assertEqual("query_timeout", result["reason"])
+        self.assertEqual("unresolved", result["status"])
+
+    def test_explicit_live_rechecks_policy_after_aggregate(self):
+        validate = self.repository.validate_relation
+        def changed(*args, **kwargs):
+            result = validate(*args, **kwargs)
+            self.policy.reject(relation_id("shared-dev", "orders", ["user_id"], "users", ["id"]), "test")
+            return result
+        self.repository.validate_relation = changed
+        result = self.manager.resolve("orders", ["user_id"], target_table="users", target_columns=["id"], force_live=True)
+        self.assertEqual("rejected_by_policy", result["reason"])
+        self.assertNotEqual("live_verified", result["status"])
+
+    def test_failed_full_refresh_returns_narrow_next_read(self):
+        def failed():
+            raise TimeoutError("full refresh")
+        self.manager.ensure_fresh = failed
+        result = self.manager.resolve("orders", ["user_id"], target_table="users", target_columns=["id"])
+        self.assertEqual("unresolved", result["status"])
+        self.assertEqual("resolve_table_relation", result["next_read"]["tool"])
+        self.assertTrue(result["next_read"]["arguments"]["force_live"])
 
     def test_query_timeout_is_recorded_but_never_verified(self):
         self.manager.repository = FakeRepository(error=TimeoutError("read operation timed out"))

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch
 from contextlib import contextmanager
 from types import SimpleNamespace
 
@@ -147,6 +148,31 @@ class SchemaRepositoryTests(unittest.TestCase):
         result = SchemaMetadataRepository(database)._columns("wide_table")
         self.assertEqual(501, len(result))
         self.assertEqual(500, database.active.calls[1]["after"])
+
+    def test_narrow_metadata_queries_only_requested_table_under_one_deadline(self):
+        class MetadataSession:
+            def __init__(self):
+                self.calls, self.timeouts = [], []
+            def set_query_timeout(self, value):
+                self.timeouts.append(value)
+            def query(self, sql, params, *, max_rows):
+                self.calls.append((sql, params))
+                if "information_schema.TABLES" in sql:
+                    return [{"TABLE_NAME": "orders", "TABLE_TYPE": "BASE TABLE"}], False
+                if "information_schema.COLUMNS" in sql:
+                    return [{"COLUMN_NAME": "id", "ORDINAL_POSITION": 1}], False
+                return [{"INDEX_NAME": "PRIMARY", "NON_UNIQUE": 0, "SEQ_IN_INDEX": 1, "COLUMN_NAME": "id"}], False
+        database = ScalarDatabase([])
+        database.active = MetadataSession()
+        with patch("gxp_core.schema_repository.time.monotonic", side_effect=[10, 10.1, 10.2]):
+            result = SchemaMetadataRepository(database).load_table_metadata("orders", deadline=11)
+        self.assertEqual("orders", result["table_name"])
+        self.assertEqual(3, len(database.active.calls))
+        self.assertTrue(all(params["table"] == "orders" for _, params in database.active.calls))
+        self.assertEqual([1000, 900, 800], database.active.timeouts)
+        with patch("gxp_core.schema_repository.time.monotonic", return_value=20):
+            with self.assertRaises(TimeoutError):
+                SchemaMetadataRepository(database).load_table_metadata("orders", deadline=20)
 
 
 if __name__ == "__main__":

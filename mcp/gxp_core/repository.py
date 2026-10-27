@@ -155,7 +155,7 @@ SELECT 'form' AS action_type, id AS ref_id, code AS action_code,
 FROM cpm_bizflows
 WHERE isDeleted=0
   AND (id=%(query)s OR code=%(query)s OR `describe` LIKE %(pattern)s)
-ORDER BY match_rank, action_type, action_name
+ORDER BY match_rank, action_type, action_name, ref_id
 LIMIT {safe_limit}
 """
         with self.database.session() as session:
@@ -463,10 +463,10 @@ LIMIT {safe_limit}
             else:
                 parts.append("0 AS `csharp_length`")
             if include_hashes:
-                parts.append(f"SHA2(`{data_column}`,256) AS `data_sha256`")
+                parts.append(f"SHA2(CONVERT(IFNULL(`{data_column}`,'') USING utf8mb4),256) AS `data_sha256`")
                 if csharp_column:
                     parts.append(
-                        f"SHA2(IFNULL(`{csharp_column}`,''),256) AS `csharp_sha256`"
+                        f"SHA2(CONVERT(IFNULL(`{csharp_column}`, '') USING utf8mb4),256) AS `csharp_sha256`"
                     )
                 else:
                     parts.append("SHA2('',256) AS `csharp_sha256`")
@@ -495,6 +495,8 @@ LIMIT {safe_limit}
         if created_column:
             order_parts.append(f"`{created_column}` DESC")
         order_parts.append(f"`{deleted_column}` ASC")
+        if aliases.get("design_id"):
+            order_parts.append(f"`{aliases['design_id']}` ASC")
         where = f"`{ref_column}`=%(ref_id)s"
         if not include_deleted:
             where += f" AND `{deleted_column}`=0"
@@ -642,7 +644,7 @@ SELECT {select_id} `{ref_column}` AS ref_id, `{publish_column}` AS is_publish,
        LENGTH(IFNULL(`{csharp_column}`,'')) AS csharp_length
 FROM `cpm_bizflows_design`
 WHERE `{csharp_column}` LIKE %(needle)s
-ORDER BY `{deleted_column}` ASC, `{publish_column}` DESC
+ORDER BY `{deleted_column}` ASC, `{publish_column}` DESC{f', `{id_column}` ASC' if id_column else ''}
 LIMIT 100
 """
         with self.database.session(timeout_ms=8000) as session:

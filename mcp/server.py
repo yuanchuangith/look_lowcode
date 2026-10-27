@@ -435,6 +435,7 @@ def trace_dynamic_exception(
     assemble matching snapshot_fingerprint/offsets through total_characters before parsing.
     Metadata continuation_complete does not complete unread records. Clipped envelopes
     keep response_complete/evidence_complete=false; has_more=false alone does not prove completeness.
+    evidence_gaps/fallback provide unsigned bounded-read guidance, not a completeness override.
     A partial page never proves absent calls, conditions or historical candidates.
     """
     return service().trace_dynamic_exception(

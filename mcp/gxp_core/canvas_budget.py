@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from .source_budget import bounded_payload
+from .evidence_guidance import guidance
 
 
 def response_limit(value: int) -> int:
@@ -36,6 +37,8 @@ def canvas_payload(result: dict[str, Any], limit: int, *, identifier: str, tool:
         }})
     bounded["next_read"] = reads or [{"tool": tool, "arguments": {"identifier": identifier, "design_id": (result.get("design") or {}).get("design_id")}, "instruction": "Narrow to an exact group and node, then read its paramsValue with inspect_action.value_path."}]
     bounded["evidence_complete"] = False
+    bounded.update(guidance("canvas_evidence_omitted", "canvas_conclusions", next_read=bounded["next_read"],
+                           can_continue=("confirmed_canvas_facts",)))
     bounded["response_complete"] = False
     bounded["response_truncated"] = True
     bounded["conclusion_gate"] = "candidate_only_until_omitted_evidence_is_read"
