@@ -43,7 +43,7 @@ description: Use this skill when the user asks to 排查或复核 GXP 低代码�
 | 下拉、`DataFilter`、无可选值、值被清空、过滤被覆盖 | [component-filter-audit.md](references/component-filter-audit.md)：汇总同组件全部相关写入点和父条件，不能凭一个初始化节点下结论 |
 | 点击、选择、留空、批量编辑，或修改后仍复现 | [branch-verification.md](references/branch-verification.md)：证明本次交互命中分支和最终写库；无法证明时不给操作性修改方案 |
 | 表、字段、备注、索引、约束、跨表关系 | [schema-relations.md](references/schema-relations.md)：开发库 Schema、可信关系、实时验证和本机否决 |
-| 摘要、省略、截断、分页、长参数或异常候选 | [diagnostic-output.md](references/diagnostic-output.md)：预算、完整性、游标与精确字段续读；不自动展开全量 |
+| 摘要、省略、截断、分页、长参数或异常候选 | [diagnostic-output.md](references/diagnostic-output.md)：预算、完整性、记录与顶层元数据续读；`has_more=false` 不单独证明完整，按需补证 |
 | 保存、发布复核或动态异常 | [platform-map.md](references/platform-map.md) 的复核顺序与 [report-contract.md](references/report-contract.md) 的输出格式 |
 | 已命中组件、API、Controller、Service、后端栈等 `source_hints` 且低代码不足 | [source-code-evidence.md](references/source-code-evidence.md)：按锚点选择前端／后端、本地有界索引与证据新鲜度；不扩大仓库搜索 |
 | 静态证据无法解释运行症状，或只在具体页面交互发生 | [runtime-browser-evidence.md](references/runtime-browser-evidence.md)：用户开启页签、六位码授权精确 Origin 后只读取证；不启动新浏览器或使用 9222 |

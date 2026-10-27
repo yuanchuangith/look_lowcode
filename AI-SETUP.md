@@ -122,7 +122,7 @@ cpm --version
 cpm status
 ```
 
-通过标准：插件来源为 `look-lowcode-local`，版本前缀与仓库 manifest 一致（当前 `0.5.4+codex.*`）；`cpm --version` 输出 `0.3.1`；`cpm status` 显示配置中的 CPM TTL，默认 5400 秒（90 分钟，查询时按需刷新）。只有需要在线认证检查时另运行 `cpm whoami`，不要把它作为源码/Schema 本地工具的必需步骤。安装成功后新建 Codex 线程。
+通过标准：插件来源为 `look-lowcode-local`，版本前缀与仓库 manifest 一致（当前 `0.5.5+codex.*`）；`cpm --version` 输出 `0.3.1`；`cpm status` 显示配置中的 CPM TTL，默认 5400 秒（90 分钟，查询时按需刷新）。只有需要在线认证检查时另运行 `cpm whoami`，不要把它作为源码/Schema 本地工具的必需步骤。安装成功后新建 Codex 线程。
 
 ### Claude Code 验收
 

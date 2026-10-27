@@ -397,6 +397,10 @@ def inspect_component_filters(
     Reuse the same arguments and next_cursor; source changes reject the cursor.
     A summary detail_cursor selects full detail for that record. Oversized records
     use record_value_page text with character offsets; follow next_cursor to assemble.
+    After record pages, next_cursor recovers clipped metadata as envelope_value_page JSON text.
+    Check snapshot_fingerprint, contiguous offsets/total_characters and record pages;
+    has_more=false alone is not completeness. Clipped envelopes always keep
+    response_complete/evidence_complete=false; truncation/omissions require review.
     Read exact node parameters through inspect_action.value_path, pinned to design_id.
     All relevant writers/conditions must be checked before asserting the final filter.
     """
@@ -427,6 +431,10 @@ def trace_dynamic_exception(
     full retains candidate evidence for the selected page; budget is 8..64 KiB.
     Continue with identical query arguments and next_cursor. Changed evidence rejects
     continuation. record_value_page contains an oversized record's JSON text fragment.
+    After record pages, next_cursor covers clipped metadata as envelope_value_page JSON fragments;
+    assemble matching snapshot_fingerprint/offsets through total_characters before parsing.
+    Metadata continuation_complete does not complete unread records. Clipped envelopes
+    keep response_complete/evidence_complete=false; has_more=false alone does not prove completeness.
     A partial page never proves absent calls, conditions or historical candidates.
     """
     return service().trace_dynamic_exception(

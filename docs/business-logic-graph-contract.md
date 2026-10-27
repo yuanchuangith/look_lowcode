@@ -1,6 +1,6 @@
 # Global Business Graph Contract
 
-Current runtime contract: Look 0.5.4. Dated verification sections below retain their original version counts and results. Agent input and review procedures are maintained in [business-logic-graph.md](../skills/gxp-lowcode-debug/references/business-logic-graph.md).
+Current runtime contract: Look 0.5.5. Dated verification sections below retain their original version counts and results. Agent input and review procedures are maintained in [business-logic-graph.md](../skills/gxp-lowcode-debug/references/business-logic-graph.md).
 
 ## Runtime and compatibility
 
