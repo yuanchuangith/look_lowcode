@@ -6,11 +6,12 @@ GXP 低代码只读诊断 MCP。服务不会执行数据库写入、画布保存
 
 | 要做什么 | 从这里开始 |
 | --- | --- |
+| 开发、修改契约、选择回归或评估性能 | [开发主文档](DEVELOPMENT.md)，唯一持续维护的开发入口 |
 | 安装、更新或迁移到 Codex / Claude Code | [安装指南](AI-SETUP.md)；安装命令及验收以该文档为准 |
 | 提问、定位、保存后复核或发布后复核 | [使用手册](GXP低代码只读排查使用手册.md) |
 | 让模型按证据排查 | [技能入口](skills/gxp-lowcode-debug/SKILL.md)，只读取当前分支需要的参考文档 |
 | 配置 Look / Write 数据库 | [统一设置说明](skills/gxp-lowcode-debug/references/database-settings.md) |
-| 查工具契约、优化结果及历史设计 | [文档索引](docs/README.md)，区分现行规则与历史记录 |
+| 查详细契约、测量附件及历史设计 | [参考及历史资料索引](docs/README.md)，日常开发统一从开发主文档进入 |
 | 启动 stdio 或部署 HTTP / systemd | 本文的[运行方式](#运行方式)与[Linux 部署](#linux-systemd-部署) |
 
 当前插件版本以 [.codex-plugin/plugin.json](.codex-plugin/plugin.json) 为准（0.5.4），源码索引为 v4。CPM CLI 的 0.3.1 是独立版本。

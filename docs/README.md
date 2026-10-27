@@ -1,14 +1,11 @@
-# Look 文档索引
+# Look 参考及历史资料索引
 
-日常使用从[仓库入口](../README.md)或[使用手册](../GXP低代码只读排查使用手册.md)开始。当前模型规则由[技能入口](../skills/gxp-lowcode-debug/SKILL.md)及其参考文档维护；安装由 [AI-SETUP.md](../AI-SETUP.md) 维护。历史计划、评估和测量记录按当时版本理解。
+唯一持续维护的开发主文档是根目录 [DEVELOPMENT.md](../DEVELOPMENT.md)。本页只索引详细契约和历史附件，不再维护并行开发流程。模型规则由 [SKILL.md](../skills/gxp-lowcode-debug/SKILL.md) 及其引用维护；安装由 [AI-SETUP.md](../AI-SETUP.md) 维护，用户操作见[使用手册](../GXP低代码只读排查使用手册.md)。历史计划、评估和测量按当时版本理解。
 
-## 当前使用与契约
+## 详细参考契约
 
 | 需要什么 | 文档 |
 | --- | --- |
-| Codex / Claude 安装、更新及验收 | [AI-SETUP.md](../AI-SETUP.md) |
-| 提问模板、排查和复核 | [使用手册](../GXP低代码只读排查使用手册.md) |
-| 模型工作流及条件路由 | [SKILL.md](../skills/gxp-lowcode-debug/SKILL.md) |
 | 动作、副本、画布及历史定位 | [platform-map.md](../skills/gxp-lowcode-debug/references/platform-map.md) |
 | 页面、菜单、组件及流程快照 | [cpm-snapshot-routing.md](../skills/gxp-lowcode-debug/references/cpm-snapshot-routing.md) |
 | 会话意图及证据绑定 | [conversation-contract.md](../skills/gxp-lowcode-debug/references/conversation-contract.md) |
@@ -24,17 +21,13 @@
 | 本机数据库设置 | [database-settings.md](../skills/gxp-lowcode-debug/references/database-settings.md) |
 | 已授权页面的运行取证 | [runtime-browser-evidence.md](../skills/gxp-lowcode-debug/references/runtime-browser-evidence.md) |
 
-本地 stdio 为 44 个工具，HTTP 为 16 个；CPM CLI 0.3.1 与 Look 插件 0.5.4 是独立版本。源码索引 v4 按层懒重建；关系否决和恢复只在本机，不需要策略服务器。整案替换必须使用精确案例的完整快照与并发令牌，不能拼接邻域。
-
-## 最新优化实施
+## 已交付实施与测量
 
 [速度与准确性实施记录](speed-accuracy-implementation-20261026.md)按三批记录响应减量、源码字节指纹、精确案例恢复及查询优化。原始五轮测量见[查询工作量基准](query-work-benchmark-20261026.json)。跨 Look / Write 的完整交付报告保存在 Write 仓库的 `docs/look-write-optimization-delivery-2026-10-26.md`。
 
-查询默认 5 秒工作预算不是包括首次初始化、旧 JSON 导入或锁等待的严格端到端上限；中断必须返回不完整状态，不能给完整计数、案例不存在或全局孤岛结论。合成基准不代表真实业务或模型端到端耗时。
-
 ## 历史设计、评估和验收
 
-保留原文件及路径以便追溯；下列文档不是新安装或当前调用的必读清单。特别是早期 v3 索引与远程关系策略内容，不能替代上面的现行参考。
+保留原文件及路径以便追溯，不作为持续维护的开发指南；下列文档不是新安装或当前调用的必读清单。特别是早期 v3 索引与远程关系策略内容，不能替代当前开发主文档和权威参考。新增历史报告仅在此登记，不新增平行开发总览。
 
 | 主题 | 文档 |
 | --- | --- |
