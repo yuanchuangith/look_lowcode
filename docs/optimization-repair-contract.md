@@ -1,5 +1,7 @@
 # 优化修复：证据与协议契约
 
+> 历史契约快照：以下内容保留早期源码索引 v3 和远程关系策略协议 v2 的设计。当前源码索引为 v4，关系否决与恢复只保存在本机；不应按本文搭建或连接策略服务器。当前规则见[源码证据](../skills/gxp-lowcode-debug/references/source-code-evidence.md)、[平台定位](../skills/gxp-lowcode-debug/references/platform-map.md)和[安装指南](../AI-SETUP.md)。
+
 ## 兼容边界
 
 MCP 工具名称、参数及 HTTP 工具集合保持不变。字段增量升级，不上传源码、Schema 或业务值。源码索引版本为 3；关系策略 JSON 文件结构仍为 1，线上协议增加 protocol_version=2。

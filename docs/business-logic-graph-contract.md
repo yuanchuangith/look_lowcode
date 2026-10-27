@@ -1,8 +1,10 @@
-# Global Business Graph Contract (0.5.0)
+# Global Business Graph Contract
+
+Current runtime contract: Look 0.5.4. Dated verification sections below retain their original version counts and results. Agent input and review procedures are maintained in [business-logic-graph.md](../skills/gxp-lowcode-debug/references/business-logic-graph.md).
 
 ## Runtime and compatibility
 
-Local stdio registers **41** tools: 16 core, 5 CPM, 7 Schema, 7 source, **6 graph**. HTTP registers the same 16 core tools and no graph tools. No graph database service, browser UI or NetworkX dependency is introduced.
+Local stdio registers **44** tools: 16 core, 5 CPM, 7 Schema, 7 source, **6 graph**, 2 handoff and 1 local database-settings tool. HTTP registers the same 16 core tools and no graph tools. No graph database service, browser UI or NetworkX dependency is introduced.
 
 The service now uses BusinessGraphStore in business_graph_store.py. The old JSON module remains only as a v2 validator/legacy compatibility implementation and its regression suite; the runtime does not dual-write JSON. Old search/upsert/invalidate inputs and legacy return fields remain accepted. V3 upsert accepts canonical entities, independent facts and complete evidence support sets; unknown stable identities become pending tasks, not guessed identities.
 
@@ -18,6 +20,8 @@ First initialization imports existing JSON and .legacy-v1.json under a migration
 
 The graph cache is metadata-only. Whitelist and text gates reject credentials, connection details, raw records, complete parameters and SQL/generated-source bodies. Mermaid is generated from validated structure with escaped labels. Cache/locking/corruption/provider failures do not authorize platform/database writes or JSON fallback; normal read-only diagnosis continues.
 
+Replacing an existing case requires an exact, complete case snapshot and its current compare-and-swap token. Check completeness and replacement safety, merge still-valid sibling supports, and bind the update to that token. Neighborhoods, summaries and truncated query results are not complete-case recovery inputs.
+
 ## Projections, budgets and completeness
 
 Business projection includes confirmed dependencies and structural context. Data projection excludes contains/belongs_to and unbound calls; only verified production/read/transform/display/mapping edges participate. Reads flow data→consumer, writes producer→data. Field-level mapping requires two stable fields and a structured mapping fingerprint; action/table/report context stays dataset_level. Static paths are explicitly not runtime execution.
@@ -28,12 +32,14 @@ Neighborhood defaults to 2 and caps at 5 hops, 200 nodes, 400 edges and 256 KiB;
 
 A per-user-request UUID shared by get/analyze enforces persisted budgets: at most 3 existing catalog lookups, 1 hop, 30 seconds, no recursion, no business-row queries or automatic full refresh. Provider reads only fresh existing CPM/Schema/source metadata. Unknown/stale/missing/timeout/invalid proof yields a deferred task; successful lookup reuses the same transactional merge. Exact current publication confirmation remains a normal targeted read-only diagnosis step, not a guessed catalog edge.
 
+Query work also defaults to 5 seconds and 25 million SQLite VM instructions. SQL progress callbacks and Python deadline checks mark interrupted results incomplete, with unknown totals and no case-absence or global-isolation claim. This is not a strict end-to-end timeout: initial cache setup, legacy JSON import and SQLite lock waits cannot be preempted by the query handler. See [the implementation and measurement boundary](speed-accuracy-implementation-20261026.md).
+
 ## Verification commands
 
-- Run tests with PYTHONPATH=mcp;tests and canonical Windows TEMP/TMP.
-- scripts/verify_mcp.py checks actual Node initialize/ping/tools-list and 41 unique tools without business calls.
+- Run targeted tests through `python scripts/run_tests.py -p test_business_graph.py` (or another relevant test module).
+- scripts/verify_mcp.py checks actual Node initialize/ping/tools-list and 44 unique tools without business calls.
 - scripts/verify_business_graph_stdio.py exercises all six graph tools against a temporary cache and deliberately missing business-database configuration using sanitized A→B→C→D fixtures, scoped invalidation and v2 compatibility.
-- scripts/verify_accuracy_stdio.py retains current diagnostic/HTTP-registry fixture checks (41 local/16 HTTP-registry; the latter is not remote deployment verification).
+- scripts/verify_accuracy_stdio.py retains diagnostic/HTTP-registry fixture checks (44 local/16 HTTP-registry; the latter is not remote deployment verification).
 - Install through scripts/install_codex_plugin.py; verify the installed launcher, plugin list and CPM version/status. No live business fact fixture is written to the real cache, and no snapshot refresh is required.
 
 ## Global graph release verification (2026-09-30)

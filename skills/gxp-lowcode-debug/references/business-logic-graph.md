@@ -1,4 +1,14 @@
-# 全局业务关系图契约（0.5.0）
+# 全局业务关系图契约（0.5.4）
+
+## 排查与留证流程
+
+开始先检索历史案例、查询已知实体邻域；案例不是图边界，公共实体复用稳定 ID，不把案例小图互相拼接。历史只作线索，当前发布副本始终是本次运行配置的权威；重查动作身份、发布设计、控制流和必要只读证据，取得 RefId→设计 ID 后用 `current_published_designs` 复核。新 Schema／源码依赖使用当前确认的 v3 证据格式，不因问题文字重标环境。
+
+最终确认后自动 `upsert_business_logic_graph`，只保存已确认关系；新案例优先 `format_version=3`，缺稳定身份保留待消歧，不按名称猜合并。普通质疑或工具失败不撤销，用户确认错误或版本／证据变化时才 `invalidate_business_logic_graph`；只撤对应案例支持，其他独立有效支持保留。
+
+融合后用 `analyze_business_graph` 检查连接、循环和缺口；字段上下游或起终点路径用 `trace_business_data_flow`。结构归属和未绑定调用不是数据流，表级证据只标 `dataset_level`，静态可达不是实际执行。孤立实体、合法输入／输出、业务独立都可能正常，不以全图连通为目标。
+
+每请求共享 UUID `request_id`，目录补查仅围绕当前确认实体，具体预算见下文。旧记录的 `legacy_review_required=true/pending_review` 表示待复核；零命中不证明丢失，不补造环境、Schema、稳定 ID 或指纹，不整体重交归档。缓存故障继续只读排查，不因缓存故障启动编辑或写业务数据。
 
 ## 工具与查询
 
@@ -16,6 +26,8 @@
 邻域／展示最多 200 节点、400 边，响应最多 256 KiB。支持集合不可切半；一条边最多返回 3 份完整支持，evidence_page_complete=false 表示其他支持未展示。路径因响应预算丢失边时整条路径不返回。分析聚合计数来自完整 scope；成员清单可以采样，带 size 和 truncated。若邻接扫描预算耗尽则 status=incomplete，不报告真实孤岛。内部扫描最多 10000 实体／20000 有效事实；图算法不依赖 NetworkX。
 
 0.5.4 起，检索、精确案例读取、邻域、路径和分析共用单次请求的 SQL／Python 工作预算（默认 5 秒、2500 万 SQLite VM 指令）。预算耗尽返回 `status=incomplete`、`incomplete_reason=GRAPH_QUERY_BUDGET_EXCEEDED`、`scope_complete=false`、`query_complete=false`；`matched_count=null`、`matched_count_complete=false` 表示总数未知。结果不能证明案例不存在、路径不存在或实体孤立，应缩小条件或读取精确案例后继续；精确读取若仍耗尽，则仍不能替换整案。普通检索成功时 `matched_count_complete=true`，返回的 count 可因 limit／字节预算更小。证据状态更新若中断会整体回滚，不留下部分撤销。
+
+这 5 秒是查询工作预算，不是包含首次建库、旧 JSON 导入或 SQLite 锁等待的端到端硬超时。
 
 ## 同一案例必须完整替换
 

@@ -2,6 +2,8 @@
 
 本文档面向在新电脑上打开本仓库的 Codex 或 Claude Code。目标是从仓库安装 `gxp-lowcode-readonly` 插件/技能、本地 MCP 运行环境和 `cpm` 命令，不依赖原电脑上的插件缓存或 `deng` 目录。
 
+本文维护安装与验收步骤；日常提问见[使用手册](GXP低代码只读排查使用手册.md)，工具与历史资料见[文档索引](docs/README.md)。插件版本以 [.codex-plugin/plugin.json](.codex-plugin/plugin.json) 为准，CPM CLI 版本单独验收。
+
 ## 安全规则
 
 - 不读取、输出、记录或通过命令参数传递平台密码和数据库密码。
@@ -61,7 +63,9 @@ macOS/Linux：
 python3 ./scripts/install_claude.py
 ```
 
-安装器会自动创建环境、挂载项目级与系统全局级 `.claude/skills/` 联接、将 `.claude/` 自动加入 `.gitignore`、配置 `.mcp.json`，并自检 44 个 MCP 工具的完整注册。在当前会话输入 `/gxp-lowcode-debug` 即可直接使用。
+安装器会自动创建环境、挂载项目级与用户级 `.claude/skills/` 联接、将项目 `.claude/` 自动加入 `.gitignore`、配置项目 `.mcp.json` 与用户 `~/.claude/.mcp.json`，并自检 44 个 MCP 工具的完整注册。重开 Claude Code 会话或重连 MCP 后，输入 `/gxp-lowcode-debug`。
+
+若已有通过 Claude CLI 注册的用户级服务，另核对其实际配置及启动路径；安装器写入上述文件不等于改写 `~/.claude.json` 中既有的用户级注册。
 
 ## 首次配置和拉取
 
@@ -106,7 +110,7 @@ macOS/Linux 使用 `sh scripts/configure_source_repositories.sh` 和对应绝对
 
 ## 可信关系与源码索引升级
 
-运行本仓库安装器更新插件即可，无需策略服务器。否决和恢复保留本机逐关系版本，切换前的关系验证按需重验，已有表结构缓存保留。源码索引 v3 按 layer 懒重建，不触发无关 CPM 拉取或全库压力测试。服务器历史文件不自动删除。
+运行本仓库安装器更新插件即可，无需策略服务器。否决和恢复保留本机逐关系版本，切换前的关系验证按需重验，已有表结构缓存保留。源码索引 v4 按 layer 懒重建，保存实际解析字节的 SHA-256 并绑定 generation；旧索引无需手工迁移。不触发无关 CPM 拉取或全库压力测试。服务器历史文件不自动删除。
 
 ## 验收
 
@@ -116,18 +120,19 @@ macOS/Linux 使用 `sh scripts/configure_source_repositories.sh` 和对应绝对
 codex plugin list
 cpm --version
 cpm status
-cpm whoami
 ```
 
-通过标准：插件来源为 `look-lowcode-local` 且版本为 `0.5.0+codex.*`；`cpm --version` 输出 `0.3.1`；`cpm status` 显示配置中的 CPM TTL，默认 5400 秒（90 分钟，查询时按需刷新）；如需在线认证检查再运行 `cpm whoami`，不要把它作为源码/Schema 本地工具的必需步骤。
+通过标准：插件来源为 `look-lowcode-local`，版本前缀与仓库 manifest 一致（当前 `0.5.4+codex.*`）；`cpm --version` 输出 `0.3.1`；`cpm status` 显示配置中的 CPM TTL，默认 5400 秒（90 分钟，查询时按需刷新）。只有需要在线认证检查时另运行 `cpm whoami`，不要把它作为源码/Schema 本地工具的必需步骤。安装成功后新建 Codex 线程。
 
 ### Claude Code 验收
 
 ```powershell
-python .\scripts\install_claude.py --skip-runtime
+python .\scripts\install_claude.py --verify-only
 ```
 
-通过标准：输出 `[OK] MCP Tool verification passed: 44 tools registered.`，且在 Claude Code 输入 `/gxp-lowcode-debug` 可识别该技能。
+通过标准：输出 `[OK] MCP initialize / ping / tools/list passed: 44 tools registered.`，且重开 Claude Code 会话后可识别 `/gxp-lowcode-debug`。`--verify-only` 不安装、不改配置；`--skip-runtime` 只跳过依赖安装，仍会执行技能与 MCP 配置步骤。
+
+协议自检不调用业务工具，只证明启动及工具注册可用；不证明数据库连接或真实业务排查已验收。
 
 日常命令：
 
@@ -141,7 +146,7 @@ cpm whoami
 `cpm pull` 会更新本地 CPM 快照；源码索引和 Schema 快照分别由首次使用或过期后的对应 MCP 工具按需刷新，不会因为插件安装自动执行开发库全量扫描。
 
 
-## 0.5.0 全局图谱升级
+## 本地图谱升级与验证
 
 安装器不会刷新 CPM 或写业务数据／平台设计，也不改变凭据。首次使用图工具在系统数据目录初始化 business-graph.sqlite3，原 JSON 和 .legacy-v1.json 保留原样；旧记录缺身份或证据时保留待复核，不补猜。图缓存失败继续只读排查，不双写旧 JSON。
 

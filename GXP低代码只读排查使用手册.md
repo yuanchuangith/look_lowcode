@@ -2,7 +2,9 @@
 
 适用插件：`gxp-lowcode-readonly`  
 适用 Skill：`gxp-lowcode-debug`  
-文档对应版本：`0.3.1（Look + CPM 本地快照，Windows/macOS/Linux 本地 stdio）`
+文档对应版本：`Look 0.5.4（Windows/macOS/Linux 本地 stdio，44 个工具）`；`CPM CLI 0.3.1` 为独立版本。
+
+安装和更新见 [AI-SETUP.md](AI-SETUP.md)；模型执行规则见 [SKILL.md](skills/gxp-lowcode-debug/SKILL.md)；契约、验收及历史报告见[文档索引](docs/README.md)。本手册面向使用者，详细工具字段以技能参考及当前工具 schema 为准。
 
 ## 1. 用途
 
@@ -45,12 +47,12 @@
 组件或字段：<已知时填写>
 发生时间和记录 ID：<排查运行样本时填写>
 
-请只读排查，不修改数据、设计、草稿，不需要读取发布状态就是isPublish=true就是发布状态，isPublish=false是草稿状态。
+请只读排查，不修改业务数据、设计或草稿；区分当前草稿、当前发布和历史发布，说明结论适用的环境及版本。
 ```
 
 如果信息不完整，也可以直接粘贴用户原话、动作编号或完整异常栈。Skill 会先定位候选，但在三项业务规则未确认前只报告当前配置，不判断配置正确或错误。
 
-## 3. 四项核心原则
+## 3. 核心原则
 
 ### 3.1 先锁定业务规则极性
 
@@ -78,6 +80,8 @@ include_generated_csharp=false
 ```
 
 第二阶段必须先缩小到分组、节点 Key 或不超过 10 个节点的画布范围，才读取完整 `paramsValue`。只有异常栈给出精确 C# 行，或节点事实仍不足时，才读取生成 C#。
+
+过滤审计和异常追踪默认返回摘要（`response_detail="summary"`，默认 16 KiB）。只续读当前问题需要的页或字段；显式 `full` 仍受当前页预算约束，不自动遍历全部分页。游标绑定查询及证据版本，证据变化后重新定位。完整参数、超大单项续读及异常候选 `runtime_published_candidates` 见[诊断输出契约](skills/gxp-lowcode-debug/references/diagnostic-output.md)。
 
 ### 3.4 区分草稿和发布
 
@@ -123,7 +127,7 @@ include_generated_csharp=false
 
 ## 5. MCP 工具
 
-本地 Windows stdio 共 35 个工具；公网 HTTP MCP 有下表前 16 个 Look 工具。HTTP MCP 不注册 CPM、Schema 或源码工具。
+本地 Windows/macOS/Linux stdio 共 44 个工具；公网 HTTP MCP 仅注册 16 个 Look 工具。本地另有 CPM、Schema、源码、图谱、诊断留证和数据库设置能力。
 
 | 分类 | 工具 | 用途 |
 | --- | --- | --- |
@@ -133,7 +137,7 @@ include_generated_csharp=false
 | 页面动作 | `list_page_actions` | 枚举一个精确页面的全部有效表单动作。 |
 | 动作搜索 | `search_actions` | 按中文名称、code 或 RefId 搜索公共/表单动作。 |
 | 动作解析 | `resolve_action` | 精确解析动作 code/RefId，必要时回退名称搜索。 |
-| 版本读取 | `get_design_versions` | 只读取当前草稿，只有读取草稿版本失败才读取当前发布和可选历史发布快照。 |
+| 版本读取 | `get_design_versions` | 读取当前草稿与当前发布的版本摘要；仅在需要历史证据时显式加载历史快照。 |
 | 版本对比 | `compare_designs` | 比较当前发布与草稿的内容、控制流配对和结构有效性变化。 |
 | 画布检查 | `inspect_action` | 返回有界节点事实、必要参数和按需生成 C# 证据。 |
 | 控制流检查 | `inspect_control_flow` | 返回完整控制块、文本树、控制流/依赖 Mermaid 和三态场景矩阵。 |
@@ -153,7 +157,7 @@ include_generated_csharp=false
 | Schema 搜索（仅本地） | `search_database_schema` | 按表名、字段名和备注有界搜索。 |
 | Schema 表详情（仅本地） | `inspect_table_schema` | 返回表、字段、索引、约束和当前可信关系。 |
 | 关系解析（仅本地） | `resolve_table_relation` | 按策略、快照新鲜度和实时数据库验证解析关系。 |
-| 关系否决（仅本地） | `reject_table_relation` | 用户明确确认错误后向远程提交 opaque relation ID。 |
+| 关系否决（仅本地） | `reject_table_relation` | 用户明确确认错误后将 opaque relation ID 和原因保存在本机。 |
 | 关系恢复（仅本地） | `restore_table_relation` | 恢复永久否决，随后重新进行数据验证。 |
 | 源码仓库状态（仅本地） | `source_repository_status` | 查看 F/G/自定义候选、Git 身份和索引新鲜度。 |
 | 源码索引刷新（仅本地） | `refresh_source_index` | 原子刷新本地结构索引，不写源码仓库。 |
@@ -162,6 +166,11 @@ include_generated_csharp=false
 | 后端调用链（仅本地） | `trace_backend_call_chain` | 从符号或真实栈追踪调用、实现、数据访问和异常流。 |
 | 数据集影响面（仅本地） | `inspect_dataset_usage` | 区分定义、发布引用、工作台引用和草稿引用。 |
 | 组件过滤契约（仅本地） | `trace_component_filter_contract` | 核对 DataFilter 历史命名反转与后端 DTO 字段。 |
+| 图谱检索（仅本地） | `search_business_logic_graph` | 检索历史案例；运行结论仍需核对当前证据。 |
+| 图谱维护（仅本地） | `upsert_business_logic_graph` / `invalidate_business_logic_graph` | 合并已确认的 metadata-only 支持，或撤销指定案例支持。 |
+| 图谱查询（仅本地） | `get_business_graph` / `trace_business_data_flow` / `analyze_business_graph` | 邻域、数据路径及有界结构分析；中断不宣称完整或全局孤岛。 |
+| 诊断留证（仅本地） | `export_edit_handoff` / `read_edit_handoff` | 可选保存和读取本机诊断；不继承编辑会话或审批。 |
+| 统一设置（仅本地） | `database_settings` | 仅按用户明确要求读取非敏感设置或打开配置窗口。 |
 
 ### CPM 配置和刷新
 
@@ -173,7 +182,7 @@ include_generated_csharp=false
 - 配置：`%APPDATA%\GxpLowcodeReadonly\cpm.json`，与 `database.json` 独立。
 - 密码：Windows Credential Manager 目标 `Codex.GxpLowcodeReadonly.Cpm`，不进入参数、JSON 或日志。
 - 快照：`%LOCALAPPDATA%\GxpLowcodeReadonly\cpm-snapshot`。
-- TTL：1800 秒（30 分钟）；超时：300 秒；并发数：10。
+- 默认 TTL：5400 秒（90 分钟），以实际配置为准；单次刷新超时：300 秒。
 - 首次、全局搜索或基线缺失执行全量刷新；精确页面在完整基线上执行单页刷新。
 - 超时或失败保留旧快照。`manifest.pulledAt` 表示内容最后变化时间，TTL 使用外部状态中的成功检查时间。
 
@@ -322,4 +331,4 @@ RefId：<RefId>
 - MCP 入口：`mcp/server.py`
 - HTTP MCP 入口：`mcp/http_server.py`
 
-本文档面向 Skill 使用者；部署、数据库配置和 systemd 服务说明以项目根目录 `README.md` 为准。
+安装、配置和迁移步骤以 [AI-SETUP.md](AI-SETUP.md) 为准；HTTP 与 systemd 部署见 [README.md](README.md#运行方式)。图谱整案替换使用[精确案例完整快照与并发令牌](skills/gxp-lowcode-debug/references/business-logic-graph.md)，不能从邻域拼接。

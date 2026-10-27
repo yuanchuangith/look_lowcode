@@ -2,6 +2,23 @@
 
 GXP 低代码只读诊断 MCP。服务不会执行数据库写入、画布保存或发布。Windows/macOS/Linux 本地 stdio 包含 16 个 Look 工具、5 个 CPM 快照工具、7 个开发库 Schema/可信关系工具、7 个本地源码业务链工具、6 个本地业务图谱工具、2 个本机交接工具和 1 个本机数据库设置工具，共 44 个；公网 Streamable HTTP 8890 仍只注册 16 个 Look 工具。关系否决和恢复、业务关系图、编辑交接及数据库设置仅在本机，不提供远程设置 API。
 
+## 文档入口
+
+| 要做什么 | 从这里开始 |
+| --- | --- |
+| 安装、更新或迁移到 Codex / Claude Code | [安装指南](AI-SETUP.md)；安装命令及验收以该文档为准 |
+| 提问、定位、保存后复核或发布后复核 | [使用手册](GXP低代码只读排查使用手册.md) |
+| 让模型按证据排查 | [技能入口](skills/gxp-lowcode-debug/SKILL.md)，只读取当前分支需要的参考文档 |
+| 配置 Look / Write 数据库 | [统一设置说明](skills/gxp-lowcode-debug/references/database-settings.md) |
+| 查工具契约、优化结果及历史设计 | [文档索引](docs/README.md)，区分现行规则与历史记录 |
+| 启动 stdio 或部署 HTTP / systemd | 本文的[运行方式](#运行方式)与[Linux 部署](#linux-systemd-部署) |
+
+当前插件版本以 [.codex-plugin/plugin.json](.codex-plugin/plugin.json) 为准（0.5.4），源码索引为 v4。CPM CLI 的 0.3.1 是独立版本。
+
+## 读取大配置
+
+遵循“定位节点 → 精读相关字段 → 查看差异摘要”。过滤审计与异常追踪默认 `response_detail="summary"`，默认预算 16 KiB；按需使用完整当前页或单项续读，不自动遍历所有页。摘要、截断或预算中断不能证明证据完整。完整值、分页绑定及异常候选字段见 [诊断输出契约](skills/gxp-lowcode-debug/references/diagnostic-output.md)。
+
 ## 数据库统一设置入口
 
 在任一插件目录运行 `python scripts/database_settings.py`（macOS/Linux 可用 `python3`），即可打开 Look/Write 共用设置窗口。地址、端口、库名统一管理，各自账户和插件专属设置保留；密码隐藏输入，仅保存在操作系统凭据库。也可以对模型说“打开数据库设置”，或明确给出要更换的地址、端口、库名，由本机 `database_settings` 工具先读取 revision，再测试并保存指定字段。未配置数据库时同样可用；失败保留原配置，旧编辑流程尚未结束时阻止切换。
@@ -46,7 +63,7 @@ python scripts/install_claude.py --verify-only
 - 自检通过实际 `scripts/start_mcp.mjs` 启动服务，执行 `initialize`、`ping`、`tools/list`，要求 44 个不重名工具；失败返回非零退出码。这不代表 44 个工具的业务功能或数据库连接均可用，自检不调用业务工具。
 - Windows 使用目录联接，Linux/macOS 使用目录软链接。相同链接重复安装保持不变；仅替换已有链接，遇到真实文件或目录会报错并保留内容，请先手工确认并迁移冲突目录。
 
-## 本地业务关系网与数据流转图（0.5.0）
+## 本地业务关系网与数据流转图
 
 每次排查贡献已确认实体、事实和完整证据支持集合；不同案例通过稳定共享实体自动融合。业务关系网和数据流转图使用同一份 SQLite，保留真实循环与合法孤立实体，不靠猜连边让全图连通。
 
@@ -63,7 +80,7 @@ python scripts/install_claude.py --verify-only
 
 不保存凭据、业务记录值、完整参数、SQL／源码正文或完整 C#；不写业务库或平台设计。图缓存失败继续只读排查。六个图工具只在本地 stdio，HTTP 保持 16 工具。覆盖率只针对声明 scope 与已知目录，不意味着未知全平台取证完成。
 
-字段与门禁见 docs/business-logic-graph-contract.md 和 skills/gxp-lowcode-debug/references/business-logic-graph.md。脱敏协议验收：`python scripts/verify_business_graph_stdio.py`，仅向临时缓存写夹具。
+字段与门禁见[图谱契约](docs/business-logic-graph-contract.md)和[技能图谱流程](skills/gxp-lowcode-debug/references/business-logic-graph.md)。整案替换必须读取精确案例的完整快照并绑定并发令牌，不能用邻域或截断结果拼整案。脱敏协议验收：`python scripts/verify_business_graph_stdio.py`，仅向临时缓存写夹具。
 
 ## CPM 本地快照定位
 
@@ -98,13 +115,13 @@ CPM 快照补充页面全貌、菜单、组件、模型、数据集、字典、�
 
 ## 可信门禁与兼容升级
 
-- 源码索引 v3 自动按需重建；旧 layer、仓库歧义、源文件变化或索引代次冲突返回明确状态，健康 layer 的结果保留。
+- 源码索引 v4 自动按需重建；每层记录实际解析字节的 SHA-256，与 generation 原子发布。即时读取验证并复用同一份字节；旧 layer、仓库歧义、源文件变化或索引代次冲突返回明确状态，健康 layer 的结果保留。
 - 前端请求通过词法边界与函数作用域解析；后端通过全限定符号、签名和接收类型连接，保留包装器不确定性与未解析调用。
 - 自动关系要求同组候选验证完整；超时、异常、截断均不等同于排除候选。显式目标验证通过返回 `verification_scope=explicit_target`。
 - 本地记录保留逐关系恢复版本；恢复会使本机旧验证及同组候选的旧唯一性失效。切换前的关系验证按需重验，表结构缓存保留。
 - 安装器更新客户端后即可使用本地记录，无需连接或升级策略服务器。
 
-协议与验收说明见 `docs/optimization-repair-contract.md`。
+现行协议见[源码证据](skills/gxp-lowcode-debug/references/source-code-evidence.md)与[平台定位](skills/gxp-lowcode-debug/references/platform-map.md)；[旧修复契约](docs/optimization-repair-contract.md)保留早期索引及远程策略协议的历史设计。
 
 ## 页面与组件定位
 

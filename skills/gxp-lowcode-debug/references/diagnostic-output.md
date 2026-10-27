@@ -1,5 +1,13 @@
 # 有界诊断结果与续读
 
+## 先定位，再精读
+
+- `inspect_action` 第一阶段保持 `include_params=false/include_generated_csharp=false`；明确分组、节点 Key 或窄画布范围后才读参数，超过 10 个节点先缩小范围。
+- 只有异常栈给出精确 C# 行，或节点事实仍不足以解释问题时，才显式 `include_generated_csharp=true`；`terms` 不是读取 C# 的授权。优先 `generated_csharp_scope=group_method`，未解析范围时不把全动作命中当精确节点。
+- `inspect_action` 默认 32 KiB；出现 `response_complete=false`、`evidence_complete=false` 或省略清单，按 `next_read` 补齐当前结论所需证据，保留 `design_id`。未补齐前只报候选，不自动耗尽所有分页。
+
+## 过滤器与动态异常
+
 `inspect_component_filters` 与 `trace_dynamic_exception` 默认 `response_detail="summary"`，默认 `max_output_bytes=16384`，允许 8192–65536；`limit=10`，允许 1–50。摘要保留定位、计数及续读入口。`response_detail="full"` 展开当前页，仍遵守预算，并不意味着一次返回全量证据。
 
 - 过滤器的分页 writer 位于顶层 `writers`，`component_filters.writer_count` 是完整匹配数；execution_order 保持所有分组中的原顺序。每个 writer 的 `params_read` 复用 `inspect_action.value_path`，绑定 design_id。只有确认全部相关 writer 及父条件后才能判断最终过滤范围。

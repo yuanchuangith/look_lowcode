@@ -44,9 +44,11 @@
 第二阶段：聚合同一组件。
 
 - 调用 `inspect_component_filters(identifier, component, include_params=false)`。
-- 必须读取返回的全部 writers，不能停在第一个初始化节点。
+- 必须核对同组件全部 writers 的入口、顺序和父条件，不能停在第一个初始化节点；先用摘要定位，再按需精读相关字段，不自动遍历所有页或拼回整份配置。
 - 仅当某个 writer 的扁平过滤事实不足时，使用精确组件 key 再传 `include_params=true`。
 - 不主动读取生成 C#；过滤配置判断通常不需要 C#。
+
+摘要／完整模式、`params_read`、版本绑定游标和单条大值续读见 [diagnostic-output.md](diagnostic-output.md)。有未读的相关 writer 或父条件时只能给部分审计结论，不能断言已覆盖全部写入点。
 
 ## 4. 全写入点审计
 

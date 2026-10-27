@@ -1,6 +1,14 @@
 # 命中驱动源码证据
 
-只在 `SKILL.md` 的源码升级门禁成立时读取和执行本流程。低代码配置已经解释问题时立即停止，不读取源码仓库。
+只在低代码证据不足且 MCP 已返回精确 `source_hints` 时读取和执行本流程。低代码配置已经解释问题时立即停止，不读取源码仓库。
+
+## 源码升级与层选择
+
+- 画布参数、过滤或分支已直接违反用户确认规则：停在低代码证据。
+- 配置正确但运行不同，且命中组件 type/key、事件或 model key：只读前端；命中 API Route、Controller、Service、方法或非动态 `GxP2.*` 栈：只读后端。
+- 请求构造与后端接收字段可能不一致且提示同时命中前后端：先前端、再后端。
+- `CallAction`、`CallPublicAction`、普通表／字段名不单独触发扫描；继续追低代码动作。仅缺真实交互且无精确源码锚点时走 [runtime-browser-evidence.md](runtime-browser-evidence.md)，纯 UI 样式、渲染或组件交互实现问题转 `gxp-component-debug`。
+- 优先结构化工具，尚未覆盖且有精确词时才用兼容脚本；无结果不扩大目录。源码只读，索引仅写本机系统目录，不上传源码正文、Schema 或业务数据。
 
 当前索引 v4 每层包含 file-fingerprints.json：保存实际解析的原始文件字节 SHA-256，随该层索引及 generation 原子发布。旧索引或缺少台账时按需重建请求层；不迁移业务数据库。需要即时读取模型绑定、异常流或过滤契约源码时，工具核对实际读取的同一份字节属于该层台账，才进行词法分析；变化最多重试一次，仍不匹配返回 unresolved，不用新源码套旧索引的行号或符号。单请求只缓存已加载索引文件，不跨请求缓存新鲜状态。
 
@@ -43,9 +51,9 @@
 - Controller、Service、方法或真实后端栈：用 `trace_backend_call_chain`。多实现、反射或同名方法返回候选，不静默选第一个。
 - 数据集影响面：用 `inspect_dataset_usage`。发布引用与草稿引用分开；草稿明确标记不影响运行。返回的表名只作为 Schema 工具锚点。
 - DataFilter 覆盖：先完成低代码 `inspect_component_filters`，再用 `trace_component_filter_contract`。必须展示历史反转 `dynamicWhere → conditionFilter（SQL 字符串）`、`staticWhere → dynamicFilter（JSON 条件）`。
-- `source_repository_status` 查看路径、branch、commit、dirty 数量和索引新鲜度；`refresh_source_index` 仅刷新本地 metadata-only 索引。当前索引为 v3，按 layer 校验源码/配置依赖；结构化结果采用 64 KiB UTF-8 JSON 硬预算，裁剪时保留未决状态。
+- `source_repository_status` 查看路径、branch、commit、dirty 数量和索引新鲜度；`refresh_source_index` 仅刷新本地 metadata-only 索引。当前索引为 v4，按 layer 校验源码/配置依赖；结构化结果采用 64 KiB UTF-8 JSON 硬预算，裁剪时保留未决状态。
 
-每项源码证据都给出 layer、kind、仓库相对 path、行号、symbol 和 confidence。源码索引 v3 对 Git NUL 状态与相关源码/配置文件内容摘要做校验；按工具请求的 layer 刷新，构建期间变更或读取代次持续变化时返回 unresolved。stale、缺失或歧义层的旧索引不参与精确证据输出；健康层保留结果但不形成跨层闭合结论。
+每项源码证据都给出 layer、kind、仓库相对 path、行号、symbol 和 confidence。源码索引 v4 对 Git NUL 状态、相关源码/配置内容摘要和实际解析字节指纹做校验；按工具请求的 layer 刷新，构建期间变更或读取代次持续变化时返回 unresolved。stale、缺失或歧义层的旧索引不参与精确证据输出；健康层保留结果但不形成跨层闭合结论。
 
 请求来自有词法边界的真实 request 调用，普通路由字符串只作候选。函数结束、箭头函数、注释和模板表达式分别处理。后端使用 namespace/type/member/signature 身份与 receiver 类型约束；短名唯一不代表调用目标确定。业务调用、数据访问、基础库和未解析调用分开，基础库默认不递归。ZeroEntity 操作需有字段或工厂返回类型证据。
 

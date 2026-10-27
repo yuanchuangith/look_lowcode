@@ -18,6 +18,7 @@
 - 精确页面检查使用单页刷新。首次初始化、旧基线缺少 `page-meta.json`、全局搜索或基线损坏使用全量刷新。
 - 需要明确重新检查平台时调用 `refresh_cpm_snapshot(force=true, ...)`。刷新只写 `%LOCALAPPDATA%` 下本地快照。
 - 刷新失败或 300 秒超时时保留旧快照。响应中的 `failures`、`refreshed_at`、`refresh_mode` 和 `cli_version` 必须进入证据说明。
+- CPM、Schema、源码索引刷新相互独立；调用源码工具不会自动刷新 CPM 或 Schema，也不会执行开发库全量关系验证。CPM 刷新只改本地文件，不修改平台设计、发布状态或业务数据。
 
 ## 知识主题按需读取
 
