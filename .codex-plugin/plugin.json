@@ -1,6 +1,6 @@
 {
   "name": "gxp-lowcode-readonly",
-  "version": "0.5.6",
+  "version": "0.5.7",
   "description": "Read-only GXP diagnostics with a local SQLite global business network, evidence-backed data lineage, bounded catalog expansion, control-flow reconstruction, source tracing and guarded SQL.",
   "author": {
     "name": "Local developer"

@@ -5,7 +5,8 @@ from typing import Any
 from .canvas import CanvasInspector
 from .config import ConfigurationError, default_config_path
 from .db import ReadOnlyDatabase
-from .diagnostics import DiagnosticEngine
+from .diagnostics import DiagnosticEngine, parse_dynamic_exception
+from .conversation import conversation_context
 from .repository import GxpRepository
 from .source_hints import build_source_hints
 from .canvas_references import select_groups
@@ -816,13 +817,16 @@ class GxpReadonlyService:
         cursor: str | None = None, limit: int = 10,
     ) -> dict[str, Any]:
         arguments = {"text": text, "at_time": at_time, "context_lines": context_lines}
-        records, envelope, identity, fingerprint = diagnostic_snapshot(
-            getattr(self, "repository", None), "trace_dynamic_exception", arguments,
-            lambda: self._exception_diagnostic(**arguments))
+        records, envelope, identity, fingerprint = self._exception_snapshot(arguments)
         return diagnostic_page(records, identity=identity, envelope=envelope,
             response_detail=response_detail, max_output_bytes=max_output_bytes, cursor=cursor, limit=limit,
             summarize=exception_summary, collection="runtime_published_candidates", snapshot_fingerprint=fingerprint,
             continuation_tool="trace_dynamic_exception")
+
+    def _exception_snapshot(self, arguments):
+        return diagnostic_snapshot(
+            getattr(self, "repository", None), "trace_dynamic_exception", arguments,
+            lambda: self._exception_diagnostic(**arguments))
 
     def _exception_diagnostic(self, text, *, at_time, context_lines):
         result = self.diagnostics.trace_dynamic_exception(
@@ -840,9 +844,43 @@ class GxpReadonlyService:
         return records, result, [text, at_time, context_lines, result, records]
 
     def diagnose_codex_input(
-        self, text: str, *, at_time: str | None = None, context: dict[str, Any] | None = None
+        self, text: str, *, at_time: str | None = None, context: dict[str, Any] | None = None,
+        context_lines: int = 4, response_detail: str = "summary", max_output_bytes: int = 16384,
+        cursor: str | None = None, limit: int = 10,
     ) -> dict[str, Any]:
-        return self.diagnostics.diagnose_codex_input(text, at_time=at_time, context=context)
+        text = (text or "").strip()
+        if not parse_dynamic_exception(text).get("matched"):
+            if cursor:
+                raise ValueError("DIAGNOSTIC_CURSOR_REQUIRES_DYNAMIC_EXCEPTION")
+            return self.diagnostics.diagnose_codex_input(text, at_time=at_time, context=context)
+        context_state = conversation_context(context, text)
+        records, envelope, identity, fingerprint = self._exception_snapshot(
+            {"text": text, "at_time": at_time, "context_lines": context_lines})
+        # Context is transport metadata, never a database dependency. Bind it to
+        # this route's cursor and keep the full value recoverable via envelope
+        # pages when a user-supplied context exceeds the response budget.
+        envelope = dict(envelope)
+        if context_state is not None:
+            envelope["conversation_context"] = context_state
+
+        def wrap(page):
+            diagnosis = {key: value for key, value in page.items() if key != "conversation_context"}
+            if "evidence_gaps" in diagnosis:
+                diagnosis["evidence_gaps"] = [
+                    {**gap, "next_read": {**gap["next_read"], "inherit_arguments":
+                        ["text", "at_time", "context", "context_lines", "max_output_bytes", "limit"]}}
+                    if gap.get("next_read") else gap for gap in diagnosis["evidence_gaps"]]
+            result = {"input_kind": "dynamic_exception", "diagnosis": diagnosis,
+                      "source_hints": page.get("source_hints", {}),
+                      "next_tools": ["inspect_action", "get_records", "evaluate_node_predicate"]}
+            if "conversation_context" in page:
+                result["conversation_context"] = page["conversation_context"]
+            return result
+
+        return diagnostic_page(records, identity=["diagnose_codex_input", fingerprint or identity, context_state],
+            envelope=envelope, response_detail=response_detail, max_output_bytes=max_output_bytes,
+            cursor=cursor, limit=limit, summarize=exception_summary, collection="runtime_published_candidates",
+            continuation_tool="diagnose_codex_input", wrap_response=wrap)
 
     def describe_table(self, table: str) -> dict[str, Any]:
         return self.repository.describe_table(table)

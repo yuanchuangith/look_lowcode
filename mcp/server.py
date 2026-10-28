@@ -291,7 +291,7 @@ def get_design_versions(
 
 def inspect_action(
     identifier: str,
-    version: str = "published",
+    version: Literal["published", "draft"] = "published",
     group: str | None = None,
     terms: list[str] | None = None,
     node_key: str | None = None,
@@ -305,10 +305,10 @@ def inspect_action(
     focus_fields: list[str] | None = None,
     include_generated_csharp: bool = False,
     max_nodes: int = 20,
-    max_output_bytes: int = 32768,
-    value_path: str | None = None,
-    value_offset: int = 0,
-    value_limit: int = 2048,
+    max_output_bytes: Annotated[int, Field(ge=8192, le=65536, strict=True)] = 32768,
+    value_path: Annotated[str | None, Field(description="JSON pointer under /paramsValue. Requires exact group and node_key; continuation requires the returned design_id.")] = None,
+    value_offset: Annotated[int, Field(ge=0, strict=True, description="Unicode character offset; nonzero continuation must pin design_id.")] = 0,
+    value_limit: Annotated[int, Field(ge=1, le=8192, strict=True)] = 2048,
 ) -> dict[str, Any]:
     """Inspect compact node facts; opt in to params/C# only after narrowing the location."""
     return service().inspect_action(
@@ -336,7 +336,7 @@ def inspect_action(
 
 def inspect_control_flow(
     identifier: str,
-    version: str = "published",
+    version: Literal["published", "draft"] = "published",
     group: str | None = None,
     node_key: str | None = None,
     start: int | None = None,
@@ -382,14 +382,14 @@ def inspect_control_flow(
 def inspect_component_filters(
     identifier: str,
     component: str,
-    version: str = "published",
+    version: Literal["published", "draft"] = "published",
     include_params: bool = False,
     design_id: str | None = None,
     at_time: str | None = None,
-    response_detail: str = "summary",
-    max_output_bytes: int = 16384,
+    response_detail: Literal["summary", "full"] = "summary",
+    max_output_bytes: Annotated[int, Field(ge=8192, le=65536, strict=True)] = 16384,
     cursor: str | None = None,
-    limit: int = 10,
+    limit: Annotated[int, Field(ge=1, le=50, strict=True)] = 10,
 ) -> dict[str, Any]:
     """Count all DataFilter writers; return bounded summary/full pages, without C#.
 
@@ -422,8 +422,9 @@ def compare_designs(ref_id: str) -> dict[str, Any]:
 
 def trace_dynamic_exception(
     text: str, at_time: str | None = None, context_lines: int = 4,
-    response_detail: str = "summary", max_output_bytes: int = 16384,
-    cursor: str | None = None, limit: int = 10,
+    response_detail: Literal["summary", "full"] = "summary",
+    max_output_bytes: Annotated[int, Field(ge=8192, le=65536, strict=True)] = 16384,
+    cursor: str | None = None, limit: Annotated[int, Field(ge=1, le=50, strict=True)] = 10,
 ) -> dict[str, Any]:
     """Trace an exception to version-bound bounded summary/full candidate pages.
 
@@ -470,7 +471,12 @@ ConversationInput = Annotated[
 ]
 
 
-def diagnose_codex_input(text: str, at_time: str | None = None, context: ConversationInput | None = None) -> dict[str, Any]:
+def diagnose_codex_input(
+    text: str, at_time: str | None = None, context: ConversationInput | None = None,
+    context_lines: int = 4, response_detail: Literal["summary", "full"] = "summary",
+    max_output_bytes: Annotated[int, Field(ge=8192, le=65536, strict=True)] = 16384,
+    cursor: str | None = None, limit: Annotated[int, Field(ge=1, le=50, strict=True)] = 10,
+) -> dict[str, Any]:
     """Accept raw natural-language or stack-trace input and route the diagnosis.
 
     Put the current request in text. Optional context is a JSON object (at most 32 KiB)
@@ -478,8 +484,15 @@ def diagnose_codex_input(text: str, at_time: str | None = None, context: Convers
     findings and corrections. Omit context on a first call. For follow-ups, pass
     the previous conversation_context.record, not the whole response or messages.
     Example context: {"anchors": [{"action_code": "ACTION01"}]}.
+    Dynamic exceptions use bounded summary/full pages and the same verified cache
+    as trace_dynamic_exception. Follow diagnosis.next_cursor/detail_cursor with
+    unchanged text/at_time/context/context_lines and matching response_detail.
+    Natural-language action resolution stays unchanged; reuse a unique complete
+    resolved_actions identity instead of resolving the same identifier again.
     """
-    return service().diagnose_codex_input(text, at_time=at_time, context=context)
+    return service().diagnose_codex_input(text, at_time=at_time, context=context,
+        context_lines=context_lines, response_detail=response_detail,
+        max_output_bytes=max_output_bytes, cursor=cursor, limit=limit)
 
 
 def describe_table(table: str) -> dict[str, Any]:

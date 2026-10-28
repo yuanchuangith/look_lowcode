@@ -54,6 +54,82 @@ class CpmSnapshotTests(unittest.TestCase):
         self.assertEqual("/a", inspected["page"]["route"])
         self.assertEqual("cpm_snapshot", inspected["source"])
 
+    def test_search_reports_result_and_scan_limits_without_claiming_zero_hits(self) -> None:
+        models = self.snapshot / "models"
+        models.mkdir()
+        paths = [models / f"{index}.json" for index in range(3)]
+        for path in paths:
+            path.write_text("needle", encoding="utf-8")
+        with patch("gxp_core.cpm_snapshot.Path.rglob", return_value=paths):
+            limited = search_platform_snapshot("needle", ["models"], limit=1, refresh_if_stale=False)
+        self.assertEqual(1, limited["count"])
+        self.assertFalse(limited["search_complete"])
+        self.assertFalse(limited["scan_complete"])
+        self.assertEqual("result_limit", limited["stop_reason"])
+        self.assertEqual(1, limited["scanned_count"])
+        self.assertEqual("CPM_SEARCH_INCOMPLETE", limited["evidence_gaps"][-1]["code"])
+        for path in paths[:2]:
+            path.write_text("absent", encoding="utf-8")
+        with patch("gxp_core.cpm_snapshot.Path.rglob", return_value=paths), patch("gxp_core.cpm_snapshot.MAX_SCAN_FILES", 2):
+            capped = search_platform_snapshot("needle", ["models"], refresh_if_stale=False)
+        self.assertTrue(capped["ok"])
+        self.assertEqual(0, capped["count"])
+        self.assertEqual(2, capped["scanned_count"])
+        self.assertFalse(capped["search_complete"])
+        self.assertEqual("scan_file_limit", capped["stop_reason"])
+        with patch("gxp_core.cpm_snapshot.Path.rglob", return_value=paths), patch("gxp_core.cpm_snapshot.MAX_SCAN_FILES", 3):
+            exact_boundary = search_platform_snapshot("needle", ["models"], limit=1, refresh_if_stale=False)
+        self.assertEqual(1, exact_boundary["count"])
+        self.assertFalse(exact_boundary["search_complete"])
+        with patch("gxp_core.cpm_snapshot.Path.rglob", return_value=paths), patch("gxp_core.cpm_snapshot.MAX_SCAN_FILES", 4):
+            complete = search_platform_snapshot("needle", ["models"], limit=2, refresh_if_stale=False)
+        self.assertTrue(complete["search_complete"])
+        self.assertEqual("completed", complete["stop_reason"])
+
+    def test_search_stops_before_walking_an_unrelated_tail_at_the_boundary(self) -> None:
+        models = self.snapshot / "models"
+        models.mkdir()
+        path = models / "one.json"
+        path.write_text("needle", encoding="utf-8")
+
+        def paths():
+            yield path
+            raise AssertionError("must stop before iterating unrelated tail")
+
+        with patch("gxp_core.cpm_snapshot.Path.rglob", return_value=paths()):
+            result = search_platform_snapshot("needle", ["models"], limit=1, refresh_if_stale=False)
+        self.assertTrue(result["ok"])
+        self.assertEqual(1, result["scanned_count"])
+        self.assertFalse(result["scan_complete"])
+        self.assertEqual("result_limit", result["stop_reason"])
+
+    def test_search_reports_unread_file_tails_and_read_failures(self) -> None:
+        models = self.snapshot / "models"
+        models.mkdir()
+        long_file = models / "long.json"
+        long_file.write_text("x" * 64000 + "needle", encoding="utf-8")
+        result = search_platform_snapshot("needle", ["models"], refresh_if_stale=False)
+        self.assertEqual(0, result["count"])
+        self.assertTrue(result["scan_complete"])
+        self.assertFalse(result["search_complete"])
+        self.assertEqual("file_content_limit", result["stop_reason"])
+        self.assertEqual(1, result["truncated_file_count"])
+        self.assertEqual(["models/long.json"], result["truncated_files"])
+        long_file.write_bytes(b"\xff")
+        result = search_platform_snapshot("needle", ["models"], refresh_if_stale=False)
+        self.assertEqual(1, result["read_failure_count"])
+        self.assertFalse(result["search_complete"])
+        self.assertEqual("file_read_failed", result["stop_reason"])
+
+    def test_complete_zero_hit_search_and_stale_context_remain_distinct(self) -> None:
+        result = search_platform_snapshot("definitely-absent", ["models"], refresh_if_stale=False)
+        self.assertTrue(result["search_complete"])
+        self.assertEqual(0, result["count"])
+        self.assertEqual(0, result["scanned_count"])
+        self.assertEqual([], result["stop_reasons"])
+        # Freshness remains an independent gate even when search scans all files.
+        self.assertEqual("snapshot_candidates_only", result["evidence_scope"])
+
     def test_failed_refresh_returns_only_explicitly_stale_candidates(self):
         with patch("gxp_core.cpm_snapshot.CpmRefreshManager") as manager:
             manager.return_value.ensure_fresh.return_value = {"ok": False, "error": {"code": "TOKEN_INVALID"}}

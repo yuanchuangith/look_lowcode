@@ -29,7 +29,7 @@ description: Use this skill when the user asks to 排查或复核 GXP 低代码�
 ## 精确排查流程
 
 1. 锁定现象后，先按下节检索本地关系图历史线索；工具不可用时继续只读排查。页面全貌、菜单、组件绑定、模型、审批流程或接口问题，按 [cpm-snapshot-routing.md](references/cpm-snapshot-routing.md) 先查 CPM 快照：已知页面用 `inspect_page_snapshot`，知识只按需用 `get_cpm_knowledge` 读取一个合法主题。快照只能形成候选，不能覆盖当前发布副本。
-2. 将用户原始输入完整传给 `diagnose_codex_input`。有 code/RefId 用 `resolve_action`；只有页面名称用 `search_pages` → 确认 Route/Id/OutId → `list_page_actions`；只有业务名称用 `search_actions`。多候选按类型、code、RefId、页面和名称消歧，不默认第一个。
+2. 将用户原始输入完整传给 `diagnose_codex_input`。若返回 `action_resolution_status="unique"`、`requires_action_selection=false`，且唯一 `resolved_actions` 已有 code/RefId，直接复用该身份进入版本读取；身份缺失或歧义时，有 code/RefId 用 `resolve_action`，只有业务名称用 `search_actions`。只有页面名称用 `search_pages` → 确认 Route/Id/OutId → `list_page_actions`。多候选按类型、code、RefId、页面和名称消歧，不默认第一个；身份复用不替代当前发布副本复查。动态异常按返回的分页与证据完整性指引精读，不重做同一分析。
 3. 用 `get_design_versions` 读取当前草稿与发布；只有历史异常才 `include_history=true`。动作身份、画布坐标、版本与异常时点规则见 [platform-map.md](references/platform-map.md)。草稿与发布是同一动作的两个副本；只有发布更新运行配置，“已同步”只表示 `data/csharp_code` 一致，不表示逻辑或运行正确。
 4. `inspect_action` 第一阶段保持 `include_params=false`、`include_generated_csharp=false`，只读定位和 `facts`；已知字段用 `focus_fields`，区分定义、读取、条件、循环和传参，零命中不证明未使用。明确分组、节点或不超过 10 个节点后才精读参数，以完整 `paramsValue` 为准。只有精确异常 C# 行或节点事实不足时才显式读生成代码，`terms` 不构成授权。
 5. 按下表读取命中的参考；沿 `CallPublicAction`、`CallAction` 追到数据库读写、显式返回或首个异常点。需字段传递链时可 `inspect_control_flow(follow_calls=true)`（默认深度 2、最多 8 动作），保留 `call_flow.unresolved`、绑定和版本边界，静态边不等于实际执行或外键。

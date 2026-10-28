@@ -10,6 +10,7 @@ from unittest.mock import patch
 from diagnostic_fixture import FixtureDatabase, STACK
 from gxp_core.diagnostic_cache import DIAGNOSTIC_CACHE, DiagnosticCache, ReadManifest
 from gxp_core.service import GxpReadonlyService
+from gxp_core.canvas_budget import payload_size
 
 
 class DiagnosticCacheTests(unittest.TestCase):
@@ -34,6 +35,61 @@ class DiagnosticCacheTests(unittest.TestCase):
         self.assertGreater(len(self.database.queries), queries)
         self.assertEqual(first["snapshot_fingerprint"], second["snapshot_fingerprint"])
         self.assertEqual(second["writers"][0]["node_key"], "writer-1")
+
+    def test_codex_exception_route_uses_bounded_cached_summary_and_restorable_continuation(self):
+        context = {"goal": "preserve-context", "anchors": [{"action_code": "ACTION01"}]}
+        service = self.service()
+        first = service.diagnose_codex_input(STACK, context=context, max_output_bytes=8192, limit=1)
+        self.assertEqual("dynamic_exception", first["input_kind"])
+        self.assertEqual(context, first["conversation_context"]["record"])
+        self.assertLessEqual(payload_size(first), 8192)
+        page = first["diagnosis"]
+        self.assertEqual("summary", page["response_detail"])
+        self.assertNotIn("actions", page)
+        self.assertNotIn("generated_csharp", page["runtime_published_candidates"][0])
+        next_read = page["evidence_gaps"][0]["next_read"]
+        self.assertEqual("diagnose_codex_input", next_read["tool"])
+        self.assertTrue(next_read["reuse_original_arguments"])
+        self.assertEqual(["text", "at_time", "context", "context_lines", "max_output_bytes", "limit"], next_read["inherit_arguments"])
+        self.assertNotIn("text", next_read["arguments"])
+        body_reads = self.database.body_reads
+        service = self.service()
+        with patch.object(service.diagnostics, "trace_dynamic_exception", side_effect=AssertionError("must reuse pure analysis")):
+            second = service.diagnose_codex_input(STACK, context=context, max_output_bytes=8192, limit=1,
+                **next_read["arguments"])
+        self.assertEqual(body_reads, self.database.body_reads)
+        self.assertEqual(page["snapshot_fingerprint"], second["diagnosis"]["snapshot_fingerprint"])
+        self.assertLessEqual(payload_size(second), 8192)
+
+    def test_codex_exception_large_context_and_stack_recover_via_envelope_pages(self):
+        context = {"goal": "中文😀" * 2500}
+        stack = STACK.replace("synthetic failure", "中文😀" * 2000)
+        args = {"context": context, "max_output_bytes": 8192, "response_detail": "full", "limit": 1}
+        result = self.service().diagnose_codex_input(stack, **args)
+        chunks = []
+        while True:
+            self.assertLessEqual(payload_size(result), 8192)
+            page = result["diagnosis"]
+            self.assertFalse(page["evidence_complete"])
+            if "envelope_value_page" in page:
+                value = page["envelope_value_page"]
+                self.assertEqual(sum(map(len, chunks)), value["offset"])
+                chunks.append(value["text"])
+            if not page["has_more"]:
+                break
+            result = self.service().diagnose_codex_input(stack, **args, cursor=page["next_cursor"])
+        restored = json.loads("".join(chunks))
+        self.assertEqual(context, restored["conversation_context"]["record"])
+        self.assertEqual("中文😀" * 2000, restored["parsed"]["message"])
+
+    def test_codex_exception_cursor_rejects_changed_context_and_design(self):
+        first = self.service().diagnose_codex_input(STACK, context={"goal": "one"}, limit=1)
+        cursor = first["diagnosis"]["next_cursor"]
+        with self.assertRaisesRegex(ValueError, "CURSOR"):
+            self.service().diagnose_codex_input(STACK, context={"goal": "two"}, cursor=cursor)
+        self.database.versions[-1]["data"] += " "
+        with self.assertRaisesRegex(ValueError, "CURSOR"):
+            self.service().diagnose_codex_input(STACK, context={"goal": "one"}, cursor=cursor)
 
     def test_mutated_same_design_id_and_permission_denial_never_use_cached_evidence(self):
         first = self.service().inspect_component_filters("ACTION01", "picker", limit=1)

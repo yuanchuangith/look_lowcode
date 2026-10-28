@@ -160,15 +160,12 @@ def refresh_cpm_snapshot(force: bool = False, page_identifier: str | None = None
 
 def _iter_files(root: Path, resource_types: Iterable[str]) -> Iterable[tuple[str, Path]]:
     seen: set[Path] = set()
-    yielded = 0
     for resource_type in resource_types:
         for rel_root in RESOURCE_ROOTS[resource_type]:
             base = _safe_child(root, rel_root)
             if not base.is_dir():
                 continue
             for path in base.rglob("*"):
-                if yielded >= MAX_SCAN_FILES:
-                    return
                 if not path.is_file() or path.is_symlink() or path in seen:
                     continue
                 try:
@@ -180,7 +177,6 @@ def _iter_files(root: Path, resource_types: Iterable[str]) -> Iterable[tuple[str
                 if resource_type == "pages" and path.name != "page-meta.json":
                     continue
                 seen.add(path)
-                yielded += 1
                 yield resource_type, path
 
 
@@ -203,25 +199,59 @@ def search_platform_snapshot(
         needle = query.casefold()
         results: list[dict[str, Any]] = []
         read_failures: list[dict[str, str]] = []
+        truncated_files: list[str] = []
+        scanned_count = 0
+        scan_complete = True
+        stop_reasons: list[str] = []
         for resource_type, path in _iter_files(root, types):
+            scanned_count += 1
             rel = path.relative_to(root).as_posix()
             haystack = rel.casefold()
             snippet = ""
-            if needle not in haystack:
+            matched = needle in haystack
+            if not matched:
                 try:
-                    text, _ = _read_utf8(path, MAX_SEARCH_FILE_BYTES, MAX_SEARCH_READ_CHARS)
+                    text, truncated = _read_utf8(path, MAX_SEARCH_FILE_BYTES, MAX_SEARCH_READ_CHARS)
+                    if truncated:
+                        truncated_files.append(rel)
                     index = text.casefold().find(needle)
-                    if index < 0:
-                        continue
-                    snippet = text[max(0, index - 100) : index + len(query) + 180].replace("\n", " ")
+                    if index >= 0:
+                        matched = True
+                        snippet = text[max(0, index - 100) : index + len(query) + 180].replace("\n", " ")
                 except SnapshotError as exc:
                     read_failures.append({"type": exc.code, "reason": str(exc), "path": rel})
-                    continue
-            results.append({"resource_type": resource_type, "path": rel, "snippet": snippet[:300]})
-            if len(results) >= actual_limit:
+            if matched:
+                results.append({"resource_type": resource_type, "path": rel, "snippet": snippet[:300]})
+            # Do not ask the iterator for another eligible path: it may have to
+            # traverse a large tail of unrelated files to find one. At an exact
+            # boundary completion remains conservatively unverified.
+            if len(results) >= actual_limit or scanned_count >= MAX_SCAN_FILES:
+                scan_complete = False
+                stop_reasons.append("result_limit" if len(results) >= actual_limit else "scan_file_limit")
                 break
+        if truncated_files:
+            stop_reasons.append("file_content_limit")
+        if read_failures:
+            stop_reasons.append("file_read_failed")
+        search_complete = scan_complete and not truncated_files and not read_failures
         context["failures"].extend(read_failures[:20])
-        return {**context, "ok": True, "query": query, "resource_types": types, "count": len(results), "limit": actual_limit, "results": results}
+        if not search_complete:
+            gap = guidance("CPM_SEARCH_INCOMPLETE", "snapshot_search_completeness",
+                can_continue=("returned_snapshot_candidates",),
+                stop_reason=stop_reasons[0], attempted=("bounded_snapshot_search",))
+            context["evidence_gaps"] = list(context.get("evidence_gaps") or []) + gap["evidence_gaps"]
+            context.setdefault("fallback", gap["fallback"])
+        return {**context, "ok": True, "query": query, "resource_types": types,
+                "count": len(results), "limit": actual_limit, "results": results,
+                "search_complete": search_complete, "scan_complete": scan_complete,
+                "scanned_count": scanned_count, "scan_file_limit": MAX_SCAN_FILES,
+                "stop_reason": stop_reasons[0] if stop_reasons else "completed",
+                "stop_reasons": stop_reasons,
+                "truncated_file_count": len(truncated_files), "truncated_files": truncated_files[:20],
+                "truncated_files_list_complete": len(truncated_files) <= 20,
+                "read_failure_count": len(read_failures),
+                "next_step": ("Narrow resource_types/query or inspect the returned page directly; "
+                              "an incomplete search cannot establish absence.") if not search_complete else None}
     except SnapshotError as exc:
         return _error_response(exc)
     except Exception as exc:

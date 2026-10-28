@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import hashlib
+import fnmatch
 import os
 import re
 import shutil
@@ -15,10 +16,12 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .source_scope import FRONTEND_ROOTS, BACKEND_ROOTS, FRONTEND_EXTENSIONS, BACKEND_EXTENSIONS, EXCLUDED_PARTS
+from .source_scope import CONFIG_PATTERNS
 from .source_budget import bounded_payload
 from .source_lex import LexedSource
 from .source_frontend import scan_requests, component_registrations
 from .source_backend import parse_backend_file, bind_backend
+from .source_parse_cache import SOURCE_PARSE_CACHE
 from .cpm_config import _atomic_json
 from .cpm_runner import _FileLock
 from .source_config import (
@@ -32,6 +35,12 @@ from .source_config import (
 
 MAX_SOURCE_BYTES = 2 * 1024 * 1024
 MAX_RESPONSE_BYTES = 64 * 1024
+# Bump when the pure per-file parser or its normalization semantics change.
+SOURCE_PARSE_VERSION = 1
+FRONTEND_ANCHOR_TERMS = (
+    "initialValues", "form.createField", "form.setValues", "dynamicFilter", "conditionFilter",
+    "setFilter", "setConditionFilter", "filterInfo", "conditions", "SearchDataCenter", "QueryDataCenter", "dataSave",
+)
 
 
 TS_SYMBOL = re.compile(r"\b(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function|class|interface|const|let|var)\s+([A-Za-z_$][\w$]*)")
@@ -125,7 +134,50 @@ def _frontend_role(relative: str) -> str:
     return "source"
 
 
-def _scan_frontend(root: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def _parse_scope(root: Path, layer: str) -> tuple | None:
+    """Hash current configuration bytes, never retain their contents or freshness."""
+    settings = (SOURCE_PARSE_VERSION, SOURCE_INDEX_VERSION, MAX_SOURCE_BYTES, layer,
+                FRONTEND_ROOTS, BACKEND_ROOTS, sorted(FRONTEND_EXTENSIONS),
+                sorted(BACKEND_EXTENSIONS), sorted(EXCLUDED_PARTS), CONFIG_PATTERNS,
+                FRONTEND_ANCHOR_TERMS)
+    digest = hashlib.sha256(json.dumps(settings, sort_keys=True).encode())
+
+    def walk_error(error: OSError) -> None:
+        raise error
+
+    try:
+        config_files = []
+        for directory, subdirectories, names in os.walk(root, onerror=walk_error):
+            subdirectories[:] = [name for name in subdirectories if name.casefold() not in EXCLUDED_PARTS]
+            for name in names:
+                if name.casefold() in {".gitignore", ".gitattributes"} or any(
+                    fnmatch.fnmatchcase(name.casefold(), pattern) for pattern in CONFIG_PATTERNS[layer]
+                ):
+                    config_files.append(Path(directory) / name)
+        for path in sorted(config_files, key=lambda item: item.as_posix()):
+            relative = path.relative_to(root).as_posix().encode("utf-8")
+            digest.update(len(relative).to_bytes(8, "big"))
+            digest.update(relative)
+            digest.update(hashlib.sha256(_read_bytes(path)).digest())
+    except (OSError, ValueError):
+        # Missing/unreadable/oversized configuration cannot authorize reuse.
+        return None
+    return (str(root.resolve()), layer, digest.hexdigest())
+
+
+def _parse_frontend_file(text: str, relative: str) -> dict[str, Any]:
+    needs_lexing = any(term in text for term in ("request", "createBehavior", *FRONTEND_ANCHOR_TERMS))
+    lexed = LexedSource(text if needs_lexing else "")
+    parsed = scan_requests(lexed, relative) if re.search(r"\brequest\s*(?:\?\.|\.)", lexed.code) else {"requests": [], "symbols": [], "call_edges": [], "route_candidates": []}
+    component_info = _frontend_component(relative)
+    names, selectors = component_registrations(lexed, relative) if component_info and "createBehavior" in lexed.code else ([], [])
+    anchors = [{"term": term, "path": relative, "line": lexed.line(match.start())}
+               for term in FRONTEND_ANCHOR_TERMS for match in re.finditer(re.escape(term), lexed.code)] if component_info else []
+    return {"parsed": parsed, "component_info": component_info, "names": names,
+            "selectors": selectors, "anchors": anchors, "errors": lexed.errors}
+
+
+def _scan_frontend(root: Path, *, reuse_parse: bool = True) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     files = _source_files(root, "frontend")
     components: dict[str, dict[str, Any]] = {}
     contracts: dict[str, dict[str, Any]] = {}
@@ -135,10 +187,8 @@ def _scan_frontend(root: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     call_edges: list[dict[str, Any]] = []
     failures: list[dict[str, Any]] = []
     fingerprints = {}
-    anchor_terms = (
-        "initialValues", "form.createField", "form.setValues", "dynamicFilter", "conditionFilter",
-        "setFilter", "setConditionFilter", "filterInfo", "conditions", "SearchDataCenter", "QueryDataCenter", "dataSave",
-    )
+    scope = _parse_scope(root, "frontend") if reuse_parse else None
+    parsed_count = reused_count = 0
     for path in files:
         relative = path.relative_to(root).as_posix()
         try:
@@ -146,12 +196,19 @@ def _scan_frontend(root: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         except (OSError, ValueError) as exc:
             failures.append({"path": relative, "reason": str(exc)[:120]})
             continue
-        needs_lexing = any(term in text for term in ("request", "createBehavior", *anchor_terms))
-        lexed = LexedSource(text if needs_lexing else "")
-        component_info = _frontend_component(relative)
-        parsed = scan_requests(lexed, relative) if re.search(r"\brequest\s*(?:\?\.|\.)", lexed.code) else {"requests": [], "symbols": [], "call_edges": [], "route_candidates": []}
-        if lexed.errors:
-            failures.append({"path": relative, "reason": "; ".join(lexed.errors[:5])})
+        key = (*scope, relative, fingerprints[relative]) if scope else None
+        entry = SOURCE_PARSE_CACHE.get(key) if key and reuse_parse else None
+        if entry is None:
+            entry = _parse_frontend_file(text, relative)
+            parsed_count += 1
+            if key and not entry["errors"]:
+                SOURCE_PARSE_CACHE.put(key, entry)
+        else:
+            reused_count += 1
+        file_result = entry
+        component_info, parsed = entry["component_info"], entry["parsed"]
+        if entry["errors"]:
+            failures.append({"path": relative, "reason": "; ".join(entry["errors"][:5])})
             continue
         if component_info:
             component, category = component_info
@@ -162,12 +219,10 @@ def _scan_frontend(root: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
             entry["files"].append({"path": relative, "role": _frontend_role(relative)})
             contract = contracts.setdefault(component.casefold(), {"component_type": component, "anchors": [], "routes": [], "files": []})
             contract["files"].append({"path": relative, "role": _frontend_role(relative)})
-            names, selectors = component_registrations(lexed, relative) if "createBehavior" in lexed.code else ([], [])
+            names, selectors = file_result["names"], file_result["selectors"]
             entry["behavior_names"].extend(names)
             entry["selectors"].extend(selectors)
-            for term in anchor_terms:
-                for match in re.finditer(re.escape(term), lexed.code):
-                    contract["anchors"].append({"term": term, "path": relative, "line": lexed.line(match.start())})
+            contract["anchors"].extend(file_result["anchors"])
             contract["routes"].extend(parsed["requests"])
         requests.extend(parsed["requests"])
         symbols.extend(parsed["symbols"])
@@ -185,6 +240,7 @@ def _scan_frontend(root: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         "call_edges": call_edges,
         "file_count": len(files),
         "file_fingerprints": fingerprints,
+        "parse_stats": {"parsed_files": parsed_count, "reused_files": reused_count},
     }
     return data, failures
 
@@ -209,22 +265,35 @@ def _parameter_types(parameters: str) -> list[str]:
     return result
 
 
-def _scan_backend(root: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+def _scan_backend(root: Path, *, reuse_parse: bool = True) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     files = _source_files(root, "backend")
     parsed = []
     failures = []
     fingerprints = {}
+    scope = _parse_scope(root, "backend") if reuse_parse else None
+    parsed_count = reused_count = 0
     for path in files:
         relative = path.relative_to(root).as_posix()
         try:
-            data, lexed = parse_backend_file(_read_text(path, fingerprints, relative), relative)
+            text = _read_text(path, fingerprints, relative)
+            key = (*scope, relative, fingerprints[relative]) if scope else None
+            entry = SOURCE_PARSE_CACHE.get(key) if key and reuse_parse else None
+            if entry is None:
+                data, lexed = parse_backend_file(text, relative)
+                parsed_count += 1
+                if key and not lexed.errors:
+                    SOURCE_PARSE_CACHE.put(key, (data, lexed))
+            else:
+                data, lexed = entry
+                reused_count += 1
             if lexed.errors:
                 failures.append({"path": relative, "reason": "; ".join(lexed.errors[:5])})
                 continue
             parsed.append((data, lexed))
         except (OSError, ValueError) as exc:
             failures.append({"path": relative, "reason": str(exc)[:120]})
-    return {**bind_backend(parsed, len(files)), "file_fingerprints": fingerprints}, failures
+    return {**bind_backend(parsed, len(files)), "file_fingerprints": fingerprints,
+            "parse_stats": {"parsed_files": parsed_count, "reused_files": reused_count}}, failures
 
 
 def _data_access_kind(line: str) -> str | None:
@@ -384,7 +453,8 @@ def refresh_source_index(force: bool = False, *, layers: Iterable[str] = ("front
                     graph_edges[layer] = _read_json(work / "graph" / f"{layer}-call-edges.json", [])
                     continue
                 try:
-                    data, failures = (_scan_frontend(Path(selected["path"])) if layer == "frontend" else _scan_backend(Path(selected["path"])))
+                    scanner = _scan_frontend if layer == "frontend" else _scan_backend
+                    data, failures = scanner(Path(selected["path"]), reuse_parse=not force)
                     if resolve_repository(layer)["selected"]["fingerprint"] != selected["fingerprint"]:
                         raise RuntimeError("SOURCE_CHANGED_DURING_BUILD")
                     staged = work / f".build-{layer}"
@@ -401,6 +471,7 @@ def refresh_source_index(force: bool = False, *, layers: Iterable[str] = ("front
                         "dto_count": len(data.get("dto_contracts", [])),
                         "call_edge_count": len(data["call_edges"]),
                         "parse_failures": failures[:100],
+                        **data.get("parse_stats", {}),
                     }
                     stats[layer] = layer_stats
                     repository_manifest[layer] = {**selected, "index_version": SOURCE_INDEX_VERSION,

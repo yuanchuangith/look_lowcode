@@ -32,8 +32,13 @@ def _continuation_guidance(result, tool, collection):
 
 def diagnostic_page(records, *, identity, envelope, response_detail="summary", max_output_bytes=16384,
                     cursor=None, limit=10, summarize=lambda item: item, collection="records", snapshot_fingerprint=None,
-                    continuation_tool=None):
+                    continuation_tool=None, wrap_response=None):
     response_limit(max_output_bytes)
+    def output(value):
+        return wrap_response(value) if wrap_response is not None else value
+
+    def output_size(value):
+        return payload_size(output(value))
     if response_detail not in {"summary", "full"} or type(limit) is not int or not 1 <= limit <= 50:
         raise ValueError("response_detail must be summary/full; limit must be 1..50")
     snapshot = snapshot_fingerprint or hashlib.sha256(_json(identity).encode("utf-8")).hexdigest()
@@ -70,7 +75,7 @@ def diagnostic_page(records, *, identity, envelope, response_detail="summary", m
                     response_complete=False, evidence_complete=False,
                     conclusion_gate="read_required_details_and_all_relevant_pages_before_conclusion")
     metadata = copy.deepcopy(envelope)
-    if payload_size({**metadata, **protocol}) > max_output_bytes // 3:
+    if output_size({**metadata, **protocol}) > max_output_bytes // 3:
         metadata = bounded_payload(metadata, max_output_bytes // 4)
     envelope_truncated = metadata != envelope
     if envelope_part is None or envelope_truncated and envelope_part == -1:
@@ -90,7 +95,7 @@ def diagnostic_page(records, *, identity, envelope, response_detail="summary", m
                       "envelope_sha256": hashlib.sha256(envelope_text.encode("utf-8")).hexdigest(),
                       "continuation_complete": False}
         result["envelope_value_page"] = value_page
-        while payload_size(result) > max_output_bytes - 1024 and len(chunk) > 1:
+        while output_size(result) > max_output_bytes - 1024 and len(chunk) > 1:
             chunk = chunk[:len(chunk) // 2]
             value_page["text"] = chunk
         envelope_part += len(chunk)
@@ -98,9 +103,9 @@ def diagnostic_page(records, *, identity, envelope, response_detail="summary", m
         value_page["continuation_complete"] = not more
         result.update(has_more=more, next_cursor=token(offset, envelope_part=envelope_part) if more else None)
         _continuation_guidance(result, continuation_tool, collection)
-        if payload_size(result) > max_output_bytes:
+        if output_size(result) > max_output_bytes:
             raise ValueError("DIAGNOSTIC_ENVELOPE_TOO_LARGE")
-        return result
+        return output(result)
 
     result = {**metadata, **protocol}
     result[collection] = []
@@ -110,7 +115,7 @@ def diagnostic_page(records, *, identity, envelope, response_detail="summary", m
         if response_detail == "summary":
             item["detail_cursor"] = token(offset, detail="full", envelope_part=envelope_part)
         candidate = {**result, collection: result[collection] + [item]}
-        if part == 0 and payload_size(candidate) <= max_output_bytes - 1024:
+        if part == 0 and output_size(candidate) <= max_output_bytes - 1024:
             result[collection].append(item)
             offset += 1
             continue
@@ -123,7 +128,7 @@ def diagnostic_page(records, *, identity, envelope, response_detail="summary", m
         chunk = text[part:part + size]
         result["record_value_page"] = {"record_index": offset, "offset": part, "text": chunk,
                                        "total_characters": len(text), "encoding": "json"}
-        while payload_size(result) > max_output_bytes - 1024 and len(chunk) > 1:
+        while output_size(result) > max_output_bytes - 1024 and len(chunk) > 1:
             chunk = chunk[:len(chunk) // 2]
             result["record_value_page"]["text"] = chunk
         part += len(chunk)
@@ -138,9 +143,9 @@ def diagnostic_page(records, *, identity, envelope, response_detail="summary", m
                   response_complete=complete,
                   evidence_complete=response_detail == "full" and complete)
     _continuation_guidance(result, continuation_tool, collection)
-    if payload_size(result) > max_output_bytes:
+    if output_size(result) > max_output_bytes:
         raise ValueError("DIAGNOSTIC_ENVELOPE_TOO_LARGE")
-    return result
+    return output(result)
 
 
 def filter_summary(item):

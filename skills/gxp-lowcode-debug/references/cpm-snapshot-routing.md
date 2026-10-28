@@ -12,6 +12,8 @@
 
 `search_platform_snapshot.resource_types` 只选问题涉及的资源类型，结果保持有界。已知 Route、Id 或 OutId 时直接用 `inspect_page_snapshot`，不要先做全局模糊扫描。
 
+检索同时检查 `search_complete/scan_complete`、`stop_reason(s)`、`scanned_count`、`truncated_file_count` 和 `read_failure_count`。达到结果/文件上限、文件正文截断或读取失败时，即使 `ok=true,count=0` 也不能证明当前快照没有匹配项。按 `next_step` 缩窄资源类型与查询，或精确检查返回页面；不要自行构造未经快照绑定的续读偏移。`search_complete=true` 仅描述已选择的本地快照范围，不能证明当前平台不存在。
+
 ## 刷新选择
 
 - 快照工具默认 `refresh_if_stale=true`。90 分钟内已有成功检查时直接读取；过期后下次查询同步等待刷新完成，不在后台定时刷新。

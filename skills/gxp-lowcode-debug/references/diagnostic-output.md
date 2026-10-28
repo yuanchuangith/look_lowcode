@@ -10,6 +10,8 @@
 
 `inspect_component_filters` 与 `trace_dynamic_exception` 默认 `response_detail="summary"`，默认 `max_output_bytes=16384`，允许 8192–65536；`limit=10`，允许 1–50。摘要保留定位、计数及续读入口。`response_detail="full"` 展开当前页，仍遵守预算，并不意味着一次返回全量证据。
 
+`diagnose_codex_input` 识别动态异常时复用同一缓存和分页协议，并接受上述参数及 `context_lines`。结果保留 `input_kind` 和嵌套的 `diagnosis`；分页标志、候选及游标从 `diagnosis` 读取，预算覆盖整个嵌套结构。按 `evidence_gaps[].next_read` 续读时保留原始 `text/at_time/context/context_lines`，不把完整响应当作 `context`；上下文或证据变化会拒绝旧游标。较大的上下文也可从 envelope 片段恢复。自然语言身份解析流程保持不变。
+
 - 过滤器的分页 writer 位于顶层 `writers`，`component_filters.writer_count` 是完整匹配数；execution_order 保持所有分组中的原顺序。每个 writer 的 `params_read` 复用 `inspect_action.value_path`，绑定 design_id。只有确认全部相关 writer 及父条件后才能判断最终过滤范围。
 - 异常候选位于唯一的 `runtime_published_candidates`，每条包含 action、发布设计身份及证据；不再重复返回 candidate_versions/current_published_vs_draft 别名。旧服务调用方若读取 actions 嵌套结构须迁移到这一集合；底层 DiagnosticEngine 的完整结果不变。
 - `has_more=true` 时，保留原查询参数并将 `next_cursor` 作为 `cursor` 继续；该链同时覆盖未读记录和被裁剪的顶层元数据（envelope）。游标绑定实际设计/证据指纹和 summary/full 模式，版本或查询变化即拒绝。摘要条目的 `detail_cursor` 用于相同查询的 full 模式，定位该条详细证据。旧 v1 记录游标仍可使用，新 v2 游标同时保存记录与元数据的字符偏移；直接使用返回值，不自行改写。

@@ -31,6 +31,35 @@ from server import (
 
 
 class ServerToolRegistrationTests(unittest.TestCase):
+    def test_diagnostic_schemas_expose_runtime_enums_and_limits(self):
+        tools = {tool.name: tool for tool in asyncio.run(create_mcp().list_tools())}
+        for name in ("inspect_action", "inspect_component_filters", "inspect_control_flow"):
+            self.assertEqual({"published", "draft"}, set(tools[name].inputSchema["properties"]["version"]["enum"]))
+        for name in ("inspect_component_filters", "trace_dynamic_exception", "diagnose_codex_input"):
+            properties = tools[name].inputSchema["properties"]
+            self.assertEqual({"summary", "full"}, set(properties["response_detail"]["enum"]))
+            self.assertEqual(8192, properties["max_output_bytes"]["minimum"])
+            self.assertEqual(65536, properties["max_output_bytes"]["maximum"])
+            self.assertEqual(50, properties["limit"]["maximum"])
+        paging = tools["inspect_action"].inputSchema["properties"]
+        self.assertIn("design_id", paging["value_offset"]["description"])
+        self.assertIn("group", paging["value_path"]["description"])
+
+    def test_invalid_public_arguments_do_not_construct_database_service(self):
+        app = create_mcp()
+        invalid = [
+            ("inspect_action", {"identifier": "a", "version": "history"}),
+            ("inspect_action", {"identifier": "a", "value_limit": 8193}),
+            ("inspect_component_filters", {"identifier": "a", "component": "c", "response_detail": "all"}),
+            ("trace_dynamic_exception", {"text": "stack", "limit": 51}),
+            ("diagnose_codex_input", {"text": "stack", "max_output_bytes": 100}),
+        ]
+        for name, arguments in invalid:
+            with self.subTest(name=name, arguments=arguments), patch("server.service") as factory:
+                with self.assertRaises(Exception):
+                    asyncio.run(app.call_tool(name, arguments))
+                factory.assert_not_called()
+
     def test_context_schema_documents_the_fields_accepted_by_the_service(self) -> None:
         for local in (True, False):
             app = create_mcp(include_local_cpm=local, include_local_schema=local, include_local_source=local, include_local_graph=local)

@@ -23,6 +23,8 @@
 
 ## 已交付实施与测量
 
+2026-10-28 的 CPM 搜索查全状态、异常入口分页统一、工具输入约束及逐文件解析复用见[修复记录](speed-accuracy-repairs-20261028.md)。源码验证与客户端安装状态分别说明。
+
 2026-10-27 新增[诊断分页缓存成对测量](diagnostic-cache-benchmark-20261027.json)及[有限补查契约](../skills/gxp-lowcode-debug/references/diagnostic-fallback.md)。本次跨库交付、独立路由评测与限制记录在 Write 的 `docs/look-write-optimization-delivery-2026-10-27.md`，不追改下列历史附件。
 
 [速度与准确性实施记录](speed-accuracy-implementation-20261026.md)按三批记录响应减量、源码字节指纹、精确案例恢复及查询优化。原始五轮测量见[查询工作量基准](query-work-benchmark-20261026.json)。跨 Look / Write 的完整交付报告保存在 Write 仓库的 `docs/look-write-optimization-delivery-2026-10-26.md`。
