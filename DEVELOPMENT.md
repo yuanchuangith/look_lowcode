@@ -52,6 +52,8 @@
 
 CPM 查询刷新失败时仅在旧快照结构可用的情况下返回显式陈旧候选；缺旧快照仍报错。源码层失败只保留健康层；不得用旧索引位置说明当前源码。离线成对测量见[缓存基准](docs/diagnostic-cache-benchmark-20261027.json)，跨库验收另见 Write 的本次交付报告。
 
+CPM 表单拉取先经 `/api/app_info` 获取当前开发版本并核对应用/站点，再把同一 `dataVersionId` 传给页面清单和结构请求；明确 `isOfficialPreview=false`，不在缺版本时回落到发布。每页 `page-meta.json.designSource` 记录来源；旧来源基线必须先全量刷新，降级保留旧页时保留原来源。显式 `refresh_cpm_snapshot` 默认跳过TTL，普通快照查询仍按TTL复用。验证入口为 `vendor/cpm-cli` 下 `npm test`（含已保存未发布后单页重拉），及 `test_cpm_snapshot.py`。
+
 在仓库根目录运行。`run_tests.py` 优先使用已安装的 Look Python 环境，否则使用当前 Python；需要已具备 [requirements.txt](requirements.txt) 依赖。它设置模块路径，默认强制关闭真实数据库测试，即使外部设置了 `GXP_LIVE_TEST=1`；只有显式 `--live` 才启用在线只读检查。
 
 ```powershell

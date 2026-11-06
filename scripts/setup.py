@@ -171,6 +171,15 @@ def install_runtime() -> dict[str, str | bool]:
     _run([str(python), "-m", "pip", "install", "--disable-pip-version-check", "-r", str(PLUGIN_ROOT / "requirements.txt")])
     cli_root, version = _install_cli(root, npm)
     look_runtime = _install_look_runtime(root, version)
+    # An installed new CLI must also become the target used by actual pulls.
+    # Do not reconfigure the platform/account or access the credential store.
+    _run([
+        str(python), "-c",
+        "import sys; sys.path.insert(0, sys.argv[1]); "
+        "from gxp_core.cpm_config import upgrade_cpm_runtime; "
+        "upgrade_cpm_runtime(sys.argv[2], sys.argv[3], sys.argv[4])",
+        str(look_runtime / "mcp"), str(root), node, str(cli_root / "dist" / "cli.js"),
+    ])
     shim, on_path = _install_global_cpm(root, python, look_runtime)
     result: dict[str, str | bool] = {
         "runtime_root": str(root),

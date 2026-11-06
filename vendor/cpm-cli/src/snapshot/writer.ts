@@ -58,7 +58,7 @@ export async function writeSnapshot(outDir, data) {
                 `${pagesMeta.deletedRoutes.length > 10 ? ' …' : ''}`,
         }] : [];
     const pageFailures = [...degradedFailures, ...deletedFailures];
-    // 已删页面名单：route → id 进 manifest（pull 下次双匹配命中即零请求跳过）
+    // 本次已删页面名单：仅作结果说明，下次仍按当前开发版本重新检查。
     const deletedPages = {};
     for (const p of data.pages) {
         if (p.deleted)
@@ -217,6 +217,7 @@ function writePages(w, outDir, data, processDirOf, diskMetadata) {
         const eventSubscriptions = extractEventSubs(page.flows).map(({ pageDir: _pageDir, ...sub }) => sub);
         const meta = {
             version: PAGE_META_VERSION,
+            designSource: page.designSource ?? null,
             route: String(page.summary.route ?? ''),
             id: String(page.summary.id ?? ''),
             outId: String(page.summary.outId ?? page.summary.id ?? ''),

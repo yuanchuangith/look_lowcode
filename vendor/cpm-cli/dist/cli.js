@@ -29,7 +29,7 @@ program
     .action((opts) => runWhoami(resolveProjectDir({ out: opts.out, cwd: process.cwd() }), opts.out ? ` --out ${opts.out}` : ''));
 program
     .command('pull')
-    .description('拉取平台配置并物化为项目目录快照（平铺于 --out 或当前目录）')
+    .description('重新拉取已保存的表单开发草稿及平台配置（无需发布；快照平铺于 --out 或当前目录）')
     .option('--page <route|id|outId>', '只拉取单个页面（缺省全量）')
     .option('--out <dir>', '项目目录（缺省当前目录；快照平铺写入）')
     .option('--json', '输出机器可读结果')

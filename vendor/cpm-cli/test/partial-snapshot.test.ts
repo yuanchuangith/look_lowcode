@@ -114,4 +114,30 @@ describe('safe partial snapshot writes', () => {
         expect(existsSync(join(root, removed.dir))).toBe(false);
         expect(readFileSync(join(root, 'indexes', 'pages.md'), 'utf8')).not.toContain('/b');
     });
+
+    it('requires a full refresh before treating an unknown source as a draft baseline', async () => {
+        const root = await baseline();
+        const source = { version: 'draft', dataVersionId: 'dev-1', appId: 'app', siteOutId: 'site' };
+        const catalog = [{ route: '/a', id: 'id-a', outId: 'out-a' }, { route: '/b', id: 'id-b', outId: 'out-b' }];
+        expect(() => assertPartialBaseline(root, catalog, source)).toThrow(PartialBaselineError);
+        const drafts = catalog.map(p => ({ ...page(p.route, p.id, p.outId, p.route), designSource: source }));
+        await writeSnapshot(root, data(drafts));
+        expect(assertPartialBaseline(root, catalog, { ...source, dataVersionId: 'dev-2' })).toHaveLength(2);
+        expect(() => assertPartialBaseline(root, catalog, { ...source, siteOutId: 'other-site' })).toThrow(PartialBaselineError);
+    });
+
+    it('preserves the original source when a full draft refresh retains a failed old page', async () => {
+        const root = await baseline();
+        const source = { version: 'draft', dataVersionId: 'dev-1', appId: 'app', siteOutId: 'site' };
+        const kept = loadPageMetadata(root).metadata.find(meta => meta.route === '/b');
+        const oldJson = readFileSync(join(root, kept.dir, 'page.json'), 'utf8');
+        await writeSnapshot(root, data([
+            { ...page('/a', 'id-a', 'out-a', 'A'), designSource: source },
+            { ...page('/b', 'id-b', 'out-b', 'B'), pageSchema: null, degradedReason: 'offline', designSource: source },
+        ]));
+        const metadata = loadPageMetadata(root).metadata;
+        expect(metadata.find(meta => meta.route === '/a').designSource).toEqual(source);
+        expect(metadata.find(meta => meta.route === '/b').designSource).toBeNull();
+        expect(readFileSync(join(root, kept.dir, 'page.json'), 'utf8')).toBe(oldJson);
+    });
 });

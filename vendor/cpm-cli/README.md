@@ -1,6 +1,8 @@
 # cpm CLI
 
-当前恢复源码版本：`0.3.1`。`src/` 是可维护源，`dist/` 是随 Look 一并提交的 NodeNext ESM 构建产物。
+当前源码版本：`0.3.2`。`src/` 是可维护源，`dist/` 是随 Look 一并提交的 NodeNext ESM 构建产物。
+
+表单清单和结构读取当前已保存的开发草稿，无需发布。每次 pull 先获取当前开发版本，再显式传入 `dataVersionId` 和 `isOfficialPreview=false`；页面元数据 `designSource` 标明草稿来源。尚未保存的设计器修改不可拉取。开发版本缺失或应用/站点不匹配时停止，不回退到发布版。
 
 CPM 低代码平台的 AI 配套 CLI：把平台配置（页面 Schema、业务规则代码、模型字段、字典/数据集等）全量拉取物化为**自包含的项目目录**——快照平铺于项目根，`.cpm/` 缓存与 `skills/cpm-platform/` 技能同在其中，拷走这个目录即可在任意机器/AI 宿主上工作（**增量写入**：内容不变不重写，git diff/mtime 只反映平台真实变化）。
 
@@ -28,7 +30,7 @@ npm run cpm -- whoami
 # 3. 拉取快照（全量请求 + 增量写入）
 npm run cpm -- pull                # 人类可读摘要（含本次变化与各阶段耗时）
 npm run cpm -- pull --json         # 机器可读（counts/changes/failures/durationMs/stageTimings）
-npm run cpm -- pull --page <路由>  # 安全单页刷新（要求已有 0.3.1 全量基线）
+npm run cpm -- pull --page <路由>  # 安全单页刷新（要求已有开发草稿全量基线）
 npm run cpm -- pull --concurrency 15  # 全局并发上限（缺省 10；网关压力大时调低）
 
 # --out <目录>：指定项目目录（绑定、缓存、快照、skills 全在其中，拷走即用；缺省当前目录）
@@ -38,7 +40,7 @@ npm run cpm -- pull --concurrency 15  # 全局并发上限（缺省 10；网关�
 # 入口：项目目录下 indexes/pages.md（路由 → 目录的权威映射表）
 ```
 
-升级 cpm-cli 后先执行一次全量 pull，为每页生成 `page-meta.json`。之后单页 pull 只替换目标页面，非目标页面和规则深层保留，页面改名完成写入后才清理旧目录，并从全部页面元数据重建四个全局索引。旧快照缺少元数据时返回 `PARTIAL_BASELINE_REQUIRED`，不会写出半份快照。
+升级 cpm-cli 后先执行一次全量 pull，为每页生成带来源的 `page-meta.json`。之后单页 pull 只替换目标页面，非目标页面和规则深层保留，页面改名完成写入后才清理旧目录，并从全部页面元数据重建四个全局索引。旧快照缺少元数据或草稿来源时返回 `PARTIAL_BASELINE_REQUIRED`，Look 包装层自动改为全量重试。降级保留的旧页保持原来源。
 
 `pull --json` 固定返回 `ok`、`mode`、`page`、`counts`、`changes`、`failures`、`health`、`durationMs` 和 `error.code`；认证、参数、目标页面和基线错误同时设置非零退出码。
 
@@ -83,6 +85,7 @@ D:/apps/qms/                # 项目目录（cpm pull --out D:/apps/qms，或 cd
 | `PAGE_NOT_FOUND` / `PAGE_AMBIGUOUS` | 改用唯一 Route、Id 或 OutId。 |
 | `PARTIAL_BASELINE_REQUIRED` | 旧快照不能安全单页更新，先执行一次全量 pull。 |
 | `PAGE_REFRESH_DEGRADED` | 目标页未完整拉取，本次不写快照，稍后重试。 |
+| `DRAFT_VERSION_UNAVAILABLE` / `DRAFT_BINDING_MISMATCH` | 未取得当前绑定的开发版本，拉取已停止；核对平台接口及应用/站点绑定。 |
 
 ## 开发
 

@@ -67,7 +67,7 @@ def print_whoami(report: dict, as_json: bool) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="cpm", description="Look-managed local CPM snapshot command")
-    parser.add_argument("--version", action="version", version="cpm 0.3.1")
+    parser.add_argument("--version", action="version", version="cpm 0.3.2")
     commands = parser.add_subparsers(dest="command")
 
     pull = commands.add_parser("pull", help="Safely refresh the local snapshot")

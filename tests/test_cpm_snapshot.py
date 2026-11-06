@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from gxp_core.cpm_config import CpmConfig
-from gxp_core.cpm_snapshot import get_cpm_knowledge, inspect_page_snapshot, search_platform_snapshot
+from gxp_core.cpm_snapshot import get_cpm_knowledge, inspect_page_snapshot, search_platform_snapshot, refresh_cpm_snapshot
 
 
 class CpmSnapshotTests(unittest.TestCase):
@@ -148,6 +148,15 @@ class CpmSnapshotTests(unittest.TestCase):
             manager.return_value.ensure_fresh.return_value = {"ok": False, "error": {"code": "REFRESH_FAILED"}}
             result = search_platform_snapshot("DataFilter")
             self.assertFalse(result["ok"])
+
+    def test_explicit_repull_bypasses_ttl_by_default(self):
+        with patch("gxp_core.cpm_snapshot.CpmRefreshManager") as manager:
+            manager.return_value.refresh.return_value = {"ok": True}
+            self.assertTrue(refresh_cpm_snapshot(page_identifier="out-a")["ok"])
+            manager.return_value.refresh.assert_called_once_with(force=True, page_identifier="out-a")
+            manager.return_value.refresh.reset_mock()
+            refresh_cpm_snapshot(force=False, page_identifier="out-a")
+            manager.return_value.refresh.assert_called_once_with(force=False, page_identifier="out-a")
 
     def test_knowledge_rejects_path_traversal_and_reads_allowlisted_component(self) -> None:
         denied = get_cpm_knowledge("component", "../DataFilter")

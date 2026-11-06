@@ -146,8 +146,8 @@ def cpm_snapshot_status() -> dict[str, Any]:
         }
 
 
-def refresh_cpm_snapshot(force: bool = False, page_identifier: str | None = None) -> dict[str, Any]:
-    """Refresh only the local read-only snapshot; use one page when a safe full baseline exists."""
+def refresh_cpm_snapshot(force: bool = True, page_identifier: str | None = None) -> dict[str, Any]:
+    """Re-pull saved form drafts now (bypass TTL by default); only the local snapshot is written."""
     try:
         if page_identifier is not None and (not isinstance(page_identifier, str) or not page_identifier.strip()):
             raise SnapshotError("INVALID_ARGUMENT", "page_identifier 不能为空")

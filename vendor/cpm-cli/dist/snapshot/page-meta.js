@@ -65,9 +65,17 @@ export function samePage(a, b) {
         || (a?.id && b?.id && a.id === b.id)
         || (a?.route && b?.route && a.route === b.route));
 }
-export function assertPartialBaseline(outDir, pageCatalog) {
+export function assertPartialBaseline(outDir, pageCatalog, designSource) {
     const loaded = loadPageMetadata(outDir);
     const errors = [...loaded.errors];
+    if (designSource) {
+        for (const meta of loaded.metadata) {
+            const source = meta.designSource;
+            if (source?.version !== 'draft' || !source?.dataVersionId
+                || source.appId !== designSource.appId || source.siteOutId !== designSource.siteOutId)
+                errors.push(`页面不是已确认的开发草稿来源: ${meta.route}`);
+        }
+    }
     for (const page of pageCatalog) {
         if (!loaded.metadata.some(meta => samePage(meta, page)))
             errors.push(`页面缺少元数据: ${page.route || page.id || page.outId}`);

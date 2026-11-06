@@ -4,7 +4,7 @@ import json
 import os
 import sys
 import tempfile
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -140,6 +140,25 @@ def _atomic_json(path: Path, data: dict[str, Any]) -> None:
 def save_cpm_config(config: CpmConfig) -> None:
     config.validate()
     _atomic_json(cpm_config_path(), asdict(config))
+
+
+def upgrade_cpm_runtime(runtime_root: str, node_path: str, cli_path: str) -> bool:
+    """Retarget an existing managed CLI binding after installation; leave credentials untouched."""
+    try:
+        config = load_cpm_config()
+    except FileNotFoundError:
+        return False
+    managed = Path(runtime_root).resolve() / "cpm-cli"
+    try:
+        Path(config.cli_path).resolve().relative_to(managed)
+        Path(cli_path).resolve().relative_to(managed)
+    except ValueError:
+        return False
+    updated = replace(config, node_path=node_path, cli_path=cli_path)
+    if updated == config:
+        return False
+    save_cpm_config(updated)
+    return True
 
 
 def set_cpm_password(account: str, password: str) -> None:

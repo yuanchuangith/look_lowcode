@@ -1,6 +1,6 @@
 {
   "name": "cpm-cli",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "CPM 低代码平台的 AI 配套 CLI：拉取平台配置物化为本地快照",
   "type": "module",
   "bin": {

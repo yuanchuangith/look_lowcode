@@ -88,7 +88,7 @@ python scripts/install_claude.py --verify-only
 CPM 快照补充页面全貌、菜单、组件、模型、数据集、字典、事件、审批流程、接口和公共动作定位；Look 当前发布副本、画布节点、生成 C#、历史异常和业务记录仍是运行结论的权威证据。
 
 - `cpm_snapshot_status()`：查看成功检查时间、CLI 版本、刷新错误和 90 分钟 TTL。
-- `refresh_cpm_snapshot(force=false, page_identifier=null)`：刷新本地快照；完整基线存在时可安全更新单页。
+- `refresh_cpm_snapshot(force=true, page_identifier=null)`：重新拉取已保存的表单开发草稿，无需发布，默认跳过缓存；完整草稿基线存在时可安全更新单页。尚未保存的设计器改动不可拉取。
 - `search_platform_snapshot(...)`：有界搜索平台资源。
 - `inspect_page_snapshot(...)`：按 Route/Id/OutId 检查页面结构、绑定和规则文件。
 - `get_cpm_knowledge(...)`：只读快照中 `cpm-platform` 技能的一个白名单主题。

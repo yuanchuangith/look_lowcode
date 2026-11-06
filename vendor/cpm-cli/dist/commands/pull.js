@@ -4,12 +4,12 @@
 import { loadConfig, loadTokenCache, saveTokenCache, resolveCredentials, resolveProjectDir, CredentialsMissingError, } from '../config/store.js';
 import { login as platformLogin, buildCookie } from '../platform/auth.js';
 import { ServiceUnavailableError } from '../platform/http-client.js';
-import { getPageList, getPageSchema, getBizflows, getBizflowDesign } from '../platform/api.js';
+import { getDraftVersion, getPageList, getPageSchema, getBizflows, getBizflowDesign } from '../platform/api.js';
 import { extractCode } from '../snapshot/code-extract.js';
 import { writeSnapshot } from '../snapshot/writer.js';
 import { fetchSharedChain } from './fetch-shared.js';
 import { translateAll, translateTitles, translateDicts, recoverLanguageRows } from './translate-stage.js';
-import { loadPrevProcessVersions, loadPrevDeletedPages } from './process-incremental.js';
+import { loadPrevProcessVersions } from './process-incremental.js';
 import { summarizeChanges } from '../snapshot/incremental.js';
 import { Semaphore } from './async-pool.js';
 import { assertPartialBaseline, PartialBaselineError } from '../snapshot/page-meta.js';
@@ -35,18 +35,12 @@ async function resolveToken(cwd, url) {
  * 页面任务本身不占闸门槽——链内串行无并发语义，只有单个 HTTP 请求占槽（经 gate）。
  * Schema 为平台错误响应（OOM/空串/502，api 层已重试 3 次）时整页降级：
  * 不再拉规则（给压力中的平台减压），writer 沿用磁盘旧快照（宁旧勿坏）。
- */ async function fetchPage(ctx, prefix, appId, siteOutId, p, failures, gate, prevDeleted) {
-    // 上次已判死的僵尸条目（route+id 双命中）：零请求直接标记 deleted；
-    // 同 route 换 id（平台重建页面）不命中，照常拉取
-    if (prevDeleted[p.route] === (p.outId || p.id)) {
-        return {
-            summary: p, pageSchema: null, deleted: true,
-            flows: [], translations: new Map(),
-        };
-    }
+ */ async function fetchPage(ctx, prefix, appId, siteOutId, dataVersionId, p, failures, gate) {
+    const designSource = { version: 'draft', dataVersionId, appId, siteOutId };
+    // 每次重新检查草稿，不复用旧发布接口留下的“已删除”名单。
     let pageSchema;
     try {
-        pageSchema = await gate.run(() => getPageSchema(ctx, prefix, { siteOutId, route: p.route, appId }));
+        pageSchema = await gate.run(() => getPageSchema(ctx, prefix, { siteOutId, route: p.route, appId, dataVersionId }));
     }
     catch (e) {
         // 平台 coreErr:000002「不存在或已删除」= loadTreeList 残留的僵尸条目：重拉永不恢复，
@@ -75,14 +69,14 @@ async function resolveToken(cwd, url) {
     // 禁用/设计拉取失败的规则：保持清单原行（无 codes → 无代码目录）
     const flowList = flows.map(f => byId.get(f.id) ?? f);
     return {
-        summary: p, pageSchema,
+        summary: p, pageSchema, designSource,
         flows: flowList,
         translations: new Map(),
     };
 }
 /** 全部页面并行拉取：在飞 HTTP 数由 gate 全局限流；单页失败进 failures 继续 */
-async function fetchPages(ctx, prefix, appId, siteOutId, routes, failures, gate, prevDeleted) {
-    const settled = await Promise.allSettled(routes.map(p => fetchPage(ctx, prefix, appId, siteOutId, p, failures, gate, prevDeleted)));
+async function fetchPages(ctx, prefix, appId, siteOutId, dataVersionId, routes, failures, gate) {
+    const settled = await Promise.allSettled(routes.map(p => fetchPage(ctx, prefix, appId, siteOutId, dataVersionId, p, failures, gate)));
     const pages = [];
     settled.forEach((r, i) => {
         if (r.status === 'fulfilled')
@@ -111,6 +105,8 @@ function pullErrorOf(error) {
         return new PullError('AUTH_REQUIRED', '未提供平台凭据，且本地 token 不存在。');
     if (error instanceof ServiceUnavailableError && (error.status === 401 || error.status === 403))
         return new PullError('AUTH_EXPIRED', '平台 token 无效或已过期。');
+    if (['DRAFT_VERSION_REQUIRED', 'DRAFT_VERSION_UNAVAILABLE', 'DRAFT_BINDING_MISMATCH'].includes(error?.code))
+        return new PullError(error.code, error.message);
     return new PullError('PULL_FAILED', String(error?.message ?? error));
 }
 function errorEnvelope(mode, page, startedAt, error) {
@@ -153,8 +149,10 @@ async function pull(opts, startedAt) {
         // 流程版本增量前提：先算输出目录并读上次版本表（无 manifest / 损坏视为首次全量）
         const outDir = projectDir; // 平铺式项目根即快照根（旧 cpm-snapshot/ 嵌套布局废弃，finalize 自然清理）
         const prevVersions = loadPrevProcessVersions(outDir);
-        const prevDeleted = loadPrevDeletedPages(outDir);
-        const pageCatalog = await getPageList(ctx, config.apiPrefix, config.appId, config.siteOutId);
+        // 每次重新获取开发版本；发布会切换版本号，不能沿用登录时或旧快照中的值。
+        const dataVersionId = await getDraftVersion(ctx, config.apiPrefix, config.appId, config.siteOutId);
+        const designSource = { version: 'draft', dataVersionId, appId: config.appId, siteOutId: config.siteOutId };
+        const pageCatalog = await getPageList(ctx, config.apiPrefix, config.appId, config.siteOutId, dataVersionId);
         let pages = pageCatalog;
         let targetPage = null;
         let baselineMetadata = undefined;
@@ -166,7 +164,7 @@ async function pull(opts, startedAt) {
                 throw new PullError('PAGE_AMBIGUOUS', `页面标识 ${opts.page} 命中多个页面，请改用唯一的 route/Id/OutId。`);
             targetPage = pages[0];
             // 在任何快照写入前证明旧快照具备全部页面元数据；旧 0.3.0 快照必须先全量升级。
-            baselineMetadata = assertPartialBaseline(outDir, pageCatalog);
+            baselineMetadata = assertPartialBaseline(outDir, pageCatalog, designSource);
         }
         // 双链并行编排（性能计划）：页面链与共享链无数据依赖；
         // 全部平台请求（含共享列表与翻译批量）经同一 gate，全程并发恒 ≤ concurrency。
@@ -178,7 +176,7 @@ async function pull(opts, startedAt) {
         const timings = {};
         const gate = new Semaphore(concurrency);
         const sharedP = timed(timings, 'shared', () => fetchSharedChain(ctx, config.apiPrefix, config.appId, failures, gate, prevVersions));
-        const pagesP = timed(timings, 'pages', () => fetchPages(ctx, config.apiPrefix, config.appId, config.siteOutId, pages, failures, gate, prevDeleted));
+        const pagesP = timed(timings, 'pages', () => fetchPages(ctx, config.apiPrefix, config.appId, config.siteOutId, dataVersionId, pages, failures, gate));
         const [pageDataRaw, shared] = await Promise.all([pagesP, sharedP]);
         if (opts.page) {
             const target = pageDataRaw[0];
@@ -213,6 +211,7 @@ async function pull(opts, startedAt) {
         const envelope = {
             ok: true,
             mode: opts.page ? 'page' : 'full',
+            page_design_source: designSource,
             page: targetPage ? {
                 route: targetPage.route, id: targetPage.id, outId: targetPage.outId, name: targetPage.name,
             } : null,
@@ -231,7 +230,7 @@ async function pull(opts, startedAt) {
         else {
             const counts = Object.entries(envelope.counts).map(([k, v]) => `${k}=${v}`).join(' ');
             const stages = Object.entries(timings).map(([k, v]) => `${k} ${(Number(v) / 1000).toFixed(1)}s`).join(' / ');
-            console.log(`拉取完成：${counts}${failures.length ? `，失败 ${failures.length} 项` : ''}（耗时 ${(envelope.durationMs / 1000).toFixed(1)}s：${stages}）`);
+            console.log(`拉取完成（表单来源：已保存的开发草稿）：${counts}${failures.length ? `，失败 ${failures.length} 项` : ''}（耗时 ${(envelope.durationMs / 1000).toFixed(1)}s：${stages}）`);
             // 健康度行（有降级/已删时显示）：AI 一眼看出快照有多少数据非本次新鲜拉取及原因
             const ph = envelope.health?.pages;
             if (ph && (ph.degraded > 0 || (ph.deleted ?? 0) > 0)) {

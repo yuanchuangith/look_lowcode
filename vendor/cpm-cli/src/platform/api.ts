@@ -2,12 +2,33 @@
 // 每函数是 platformGet 的薄封装 + 实测响应解包；字段名依据 test/fixtures/real/（2026-08-25 实测）。
 import { platformGet, ServiceUnavailableError } from './http-client.js';
 import { detectPlatformError, isPermanentPlatformError } from './error-shape.js';
+/** 当前可编辑版本；与平台 AppsService.GetAppInfo 的 State=0 选择保持一致。 */
+export async function getDraftVersion(ctx, apiPrefix, appId, siteOutId) {
+    const resp = await platformGet(ctx, apiPrefix, '/api/app_info', { timestamp: Date.now() });
+    const info = resp?.data;
+    const actualApp = info?.appId ?? info?.AppId;
+    const actualSite = info?.siteOutId ?? info?.SiteOutId;
+    const version = info?.dataVersionId ?? info?.DataVersionId;
+    if (typeof version !== 'string' || !version.trim()) {
+        throw Object.assign(new Error('平台未返回当前开发版本，已停止拉取，未回退到发布版。'), { code: 'DRAFT_VERSION_UNAVAILABLE' });
+    }
+    if (actualApp !== appId || actualSite !== siteOutId) {
+        throw Object.assign(new Error('当前开发版本与绑定的应用/站点不一致，已停止拉取。'), { code: 'DRAFT_BINDING_MISMATCH' });
+    }
+    return version;
+}
+
+function requireDraftVersion(dataVersionId) {
+    if (typeof dataVersionId !== 'string' || !dataVersionId.trim())
+        throw Object.assign(new Error('读取表单草稿必须指定开发版本 dataVersionId。'), { code: 'DRAFT_VERSION_REQUIRED' });
+}
 /**
  * 页面清单（实测定案 loadTreeList）：树形数组，全部有 Route 的节点都是页面
  * （顶层节点可能既是容器又是页面，如"培训管理"自身可路由），递归平铺。
  */
-export async function getPageList(ctx, apiPrefix, appId, siteOutId) {
-    const tree = await platformGet(ctx, apiPrefix, '/inbiz/api/services/engines/v3/page/loadTreeList', { appId, siteOutId });
+export async function getPageList(ctx, apiPrefix, appId, siteOutId, dataVersionId) {
+    requireDraftVersion(dataVersionId);
+    const tree = await platformGet(ctx, apiPrefix, '/inbiz/api/services/engines/v3/page/loadTreeList', { appId, siteOutId, dataVersionId });
     // 实测（2026-08-25 冒烟）：token 失效时 inbiz 引擎可能返回 200 + 登录重定向对象（而非 403），
     // 此时按认证失败处理，让 pull 走重新 login 指引而非崩溃
     if (!Array.isArray(tree)) {
@@ -39,8 +60,12 @@ export async function getPageList(ctx, apiPrefix, appId, siteOutId) {
  * 仍错抛自解释错误（上层降级沿用旧快照，不写坏数据）。
  */
 export async function getPageSchema(ctx, apiPrefix, q) {
+    requireDraftVersion(q.dataVersionId);
     const fetchOnce = async () => {
-        const resp = await platformGet(ctx, apiPrefix, '/inbiz/api/services/front/engines/v3/page', { siteOutId: q.siteOutId, route: q.route, appId: q.appId, dataVersionId: q.dataVersionId });
+        const resp = await platformGet(ctx, apiPrefix, '/inbiz/api/services/front/engines/v3/page', {
+            siteOutId: q.siteOutId, route: q.route, appId: q.appId, dataVersionId: q.dataVersionId,
+            isOfficialPreview: false, isAuth: false, isPage: false,
+        });
         if (typeof resp?.Component !== 'string')
             return resp;
         try {
