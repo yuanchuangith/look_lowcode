@@ -105,7 +105,10 @@ def _cpm(node: dict, scope: str, environment: str, deadline: float) -> dict:
     from .cpm_config import load_cpm_config
     from .cpm_runner import _is_fresh, _read_status
     config = load_cpm_config()
-    if not _is_fresh(config, _read_status(), None):
+    cache_scope = getattr(config, "cache_scope", "")
+    if cache_scope and not scope.endswith("|database:" + cache_scope):
+        return {"reason": "catalog_scope_unresolved"}
+    if not _is_fresh(config, _read_status(config), None):
         return {"reason": "catalog_missing_or_stale"}
     root = Path(config.snapshot_dir)
     page_id = node["key"].get("platform_id", node["key"].get("page_id"))
@@ -139,7 +142,7 @@ def _cpm(node: dict, scope: str, environment: str, deadline: float) -> dict:
                              "key": {"page_id": meta["id"], "component_id": component_id}})
             facts.append({"id": "contains-" + component_id, "source": "page", "target": local_id,
                           "kind": "contains", "label": "catalog display component", "evidence_ids": ["catalog-proof"]})
-    status = _read_status()
+    status = _read_status(config)
     if node["kind"] == "report" and not any(item["key"].get("component_id") == node["key"]["component_id"] for item in entities):
         return {"reason": "identity_unresolved"}
     page_versions = {key: value.get("last_completed_at") for key, value in status.get("pages", {}).items() if isinstance(value, dict)}

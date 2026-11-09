@@ -31,4 +31,4 @@ if (-not $pythonPath) {
     throw 'Python GUI runtime is missing. Install Look or Write first, then retry.'
 }
 
-Start-Process -FilePath $pythonPath -ArgumentList @('"' + $settingsScript + '"')
+Start-Process -FilePath $pythonPath -ArgumentList @('"' + $settingsScript + '"') -WindowStyle Hidden

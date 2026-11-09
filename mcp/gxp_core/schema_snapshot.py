@@ -122,8 +122,8 @@ class SchemaSnapshotManager:
         database: ReadOnlyDatabase | None = None,
         policy: RelationPolicyClient | None = None,
     ):
-        self.config = config or load_schema_config()
         self.database = database or ReadOnlyDatabase()
+        self.config = config or load_schema_config(self.database.config)
         self.repository = SchemaMetadataRepository(self.database, query_timeout_ms=self.config.query_timeout_ms)
         self.policy = policy or RelationPolicyClient(self.config)
         self.root = Path(self.config.snapshot_dir).resolve()
@@ -136,7 +136,7 @@ class SchemaSnapshotManager:
 
     def status(self) -> dict[str, Any]:
         manifest = self._manifest()
-        status = _read_json(schema_status_path(), {})
+        status = _read_json(schema_status_path(self.config), {})
         try:
             policy = self.policy.sync()
             policy_status = {"available": True, "storage": "local", "scope_id": self.config.policy_scope_id,
@@ -165,17 +165,17 @@ class SchemaSnapshotManager:
             return {"refreshed": False, **self.status()}
         started = time.monotonic()
         timeout = float(self.config.refresh_timeout_seconds)
-        with _FileLock(schema_lock_path(), timeout):
+        with _FileLock(schema_lock_path(self.config), timeout):
             manifest = self._manifest()
             if not force and self._fresh(manifest):
                 return {"refreshed": False, **self.status()}
             try:
                 result = self._refresh_locked(started, timeout)
-                _atomic_json(schema_status_path(), {"last_success_at": _now(), "last_error": None})
+                _atomic_json(schema_status_path(self.config), {"last_success_at": _now(), "last_error": None})
                 return result
             except Exception as exc:
-                _atomic_json(schema_status_path(), {
-                    "last_success_at": _read_json(schema_status_path(), {}).get("last_success_at"),
+                _atomic_json(schema_status_path(self.config), {
+                    "last_success_at": _read_json(schema_status_path(self.config), {}).get("last_success_at"),
                     "last_error": f"{type(exc).__name__}: {str(exc)[:240]}",
                     "failed_at": _now(),
                 })
@@ -631,7 +631,7 @@ class SchemaSnapshotManager:
         return {"evidence_layer": "本机用户否决", **result}
 
     def restore(self, relation: str) -> dict[str, Any]:
-        with _FileLock(schema_lock_path(), float(self.config.refresh_timeout_seconds)):
+        with _FileLock(schema_lock_path(self.config), float(self.config.refresh_timeout_seconds)):
             result = self.policy.restore(relation)
             verified_path = self.root / "relations" / "verified.json"
             verified = _read_json(verified_path, [])

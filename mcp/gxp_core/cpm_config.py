@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import tempfile
 from dataclasses import asdict, dataclass, replace
@@ -55,12 +56,19 @@ def cpm_runtime_root() -> Path:
     return _data_root() / "GxpLowcodeReadonly"
 
 
-def cpm_status_path() -> Path:
-    return cpm_runtime_root() / "cpm-refresh-status.json"
+def cpm_status_path(config=None) -> Path:
+    return _cpm_cache_root(config) / "cpm-refresh-status.json"
 
 
-def cpm_lock_path() -> Path:
-    return cpm_runtime_root() / "cpm-refresh.lock"
+def cpm_lock_path(config=None) -> Path:
+    return _cpm_cache_root(config) / "cpm-refresh.lock"
+
+
+def _cpm_cache_root(config) -> Path:
+    if config is not None and getattr(config, "cache_scope", ""):
+        directory = Path(config.snapshot_dir)
+        return directory.with_name(directory.name + ".state")
+    return cpm_runtime_root()
 
 
 @dataclass(frozen=True)
@@ -73,6 +81,12 @@ class CpmConfig:
     ttl_seconds: int = DEFAULT_TTL_SECONDS
     timeout_seconds: int = DEFAULT_TIMEOUT_SECONDS
     concurrency: int = DEFAULT_CONCURRENCY
+    cache_scope: str = ""
+    credential_target: str = CPM_CREDENTIAL_TARGET
+    app_id: str = ""
+    site_out_id: str = ""
+    api_prefix: str = "/gxp2"
+    fresh_pull: bool = False
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "CpmConfig":
@@ -88,11 +102,16 @@ class CpmConfig:
             ttl_seconds=int(raw.get("ttl_seconds", DEFAULT_TTL_SECONDS)),
             timeout_seconds=int(raw.get("timeout_seconds", DEFAULT_TIMEOUT_SECONDS)),
             concurrency=int(raw.get("concurrency", DEFAULT_CONCURRENCY)),
+            credential_target=str(raw.get("credential_target") or CPM_CREDENTIAL_TARGET),
+            app_id=str(raw.get("app_id") or ""), site_out_id=str(raw.get("site_out_id") or ""),
+            api_prefix=str(raw.get("api_prefix") or "/gxp2"),
         )
         config.validate()
         return config
 
     def validate(self) -> None:
+        if self.cache_scope and not re.fullmatch(r"[a-f0-9]{64}", self.cache_scope):
+            raise ValueError("Invalid database cache scope")
         if not self.platform_url.startswith(("http://", "https://")):
             raise ValueError("platform_url 必须是 HTTP(S) 地址")
         if not self.account:
@@ -108,7 +127,27 @@ class CpmConfig:
             raise ValueError("TTL、超时和并发数必须是正整数")
 
 
-def load_cpm_config() -> CpmConfig:
+def bind_cpm_cache(config: CpmConfig, database_config=None) -> CpmConfig:
+    if config.cache_scope:
+        return config  # A request keeps its originally loaded database namespace.
+    from .cache_scope import database_cache_scope
+    scope = database_cache_scope(database_config)
+    if scope is None:
+        return config
+    from gxp_project_context.context import get_context
+    context = get_context(role="look")
+    if context is not None and context.managed and context.database_scope == scope:
+        binding = context.platform_binding
+        return replace(config, snapshot_dir=str(context.snapshot_root("cpm")), cache_scope=scope,
+                       platform_url=str(binding.get("platform_url") or config.platform_url),
+                       account=str(binding.get("account") or config.account),
+                       credential_target=str(binding.get("credential_target") or config.credential_target),
+                       app_id=str(binding.get("app_id") or ""), site_out_id=str(binding.get("site_out_id") or ""),
+                       api_prefix=str(binding.get("form_config", {}).get("api_prefix") or config.api_prefix))
+    return replace(config, snapshot_dir=str(Path(config.snapshot_dir) / "environments" / scope), cache_scope=scope)
+
+
+def load_cpm_config(database_config=None) -> CpmConfig:
     path = cpm_config_path()
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -118,7 +157,7 @@ def load_cpm_config() -> CpmConfig:
         raise ValueError("cpm.json 不是有效 UTF-8 JSON") from exc
     if not isinstance(raw, dict):
         raise ValueError("cpm.json 顶层必须是对象")
-    return CpmConfig.from_dict(raw)
+    return bind_cpm_cache(CpmConfig.from_dict(raw), database_config)
 
 
 def _atomic_json(path: Path, data: dict[str, Any]) -> None:
@@ -139,7 +178,24 @@ def _atomic_json(path: Path, data: dict[str, Any]) -> None:
 
 def save_cpm_config(config: CpmConfig) -> None:
     config.validate()
-    _atomic_json(cpm_config_path(), asdict(config))
+    value = asdict(config)
+    value.pop("cache_scope", None)
+    value.pop("fresh_pull", None)
+    directory = Path(config.snapshot_dir)
+    if config.cache_scope and directory.parent.name == "environments" and directory.name == config.cache_scope:
+        value["snapshot_dir"] = str(directory.parent.parent)
+    elif config.cache_scope:
+        from gxp_project_context.context import get_context
+        context = get_context(role="look")
+        if context is not None and context.managed and directory == context.snapshot_root("cpm"):
+            original = json.loads(cpm_config_path().read_text(encoding="utf-8"))
+            value["snapshot_dir"] = original["snapshot_dir"]
+            for key in ("platform_url", "account", "credential_target", "app_id", "site_out_id", "api_prefix"):
+                if key in original:
+                    value[key] = original[key]
+                else:
+                    value.pop(key, None)
+    _atomic_json(cpm_config_path(), value)
 
 
 def upgrade_cpm_runtime(runtime_root: str, node_path: str, cli_path: str) -> bool:
@@ -168,7 +224,7 @@ def set_cpm_password(account: str, password: str) -> None:
 
 
 def get_cpm_password(config: CpmConfig) -> str:
-    password = keyring.get_password(CPM_CREDENTIAL_TARGET, config.account)
+    password = keyring.get_password(config.credential_target, config.account)
     if not password:
         raise RuntimeError("CPM_PASSWORD_MISSING")
     return password

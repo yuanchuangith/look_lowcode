@@ -12,7 +12,7 @@ from typing import Any
 from .schema_config import schema_runtime_root
 
 
-IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
+IDENTIFIER_RE = re.compile(r"^[A-Za-z0-9_.-]{1,128}(?:\|database:[a-f0-9]{64})?$")
 RELATION_ID_RE = re.compile(r"^[a-f0-9]{64}$")
 REASON_CODES = {
     "user_confirmed_incorrect",

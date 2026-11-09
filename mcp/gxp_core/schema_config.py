@@ -50,12 +50,19 @@ def schema_config_path() -> Path:
     return Path(override).expanduser().resolve() if override else _config_root() / "GxpLowcodeReadonly" / "schema.json"
 
 
-def schema_status_path() -> Path:
-    return schema_runtime_root() / "schema-refresh-status.json"
+def schema_status_path(config=None) -> Path:
+    return _schema_cache_root(config) / "schema-refresh-status.json"
 
 
-def schema_lock_path() -> Path:
-    return schema_runtime_root() / "schema-refresh.lock"
+def schema_lock_path(config=None) -> Path:
+    return _schema_cache_root(config) / "schema-refresh.lock"
+
+
+def _schema_cache_root(config) -> Path:
+    if config is not None and re.search(r"\|database:[0-9a-f]{64}$", config.policy_scope_id):
+        directory = Path(config.snapshot_dir)
+        return directory.with_name(directory.name + ".state")
+    return schema_runtime_root()
 
 
 def schema_policy_cache_path() -> Path:
@@ -125,7 +132,7 @@ def _atomic_json(path: Path, value: Any) -> None:
             pass
 
 
-def load_schema_config() -> SchemaSnapshotConfig:
+def load_schema_config(database_config=None) -> SchemaSnapshotConfig:
     path = schema_config_path()
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -136,17 +143,20 @@ def load_schema_config() -> SchemaSnapshotConfig:
     if not isinstance(raw, dict):
         raise ValueError("schema.json 顶层必须是对象")
     config = SchemaSnapshotConfig.from_dict(raw)
-    from .connection_settings import active_settings
-    active = active_settings()
-    if active is not None:
-        from .handoff_store import environment_scope
-        scope = environment_scope(active)
+    from .cache_scope import database_cache_scope
+    scope = database_cache_scope(database_config)
+    if scope is not None:
         base_dir = Path(config.snapshot_dir)
         if base_dir.parent.name == "environments" and re.fullmatch(r"[0-9a-f]{64}", base_dir.name):
             base_dir = base_dir.parent.parent
         base_scope = re.sub(r"\|database:[0-9a-f]{64}$", "", config.policy_scope_id)
         config = replace(config, snapshot_dir=str(base_dir / "environments" / scope),
                          policy_scope_id=base_scope + "|database:" + scope)
+        from gxp_project_context.context import get_context
+        context = get_context(role="look")
+        if context is not None and context.managed and context.database_scope == scope:
+            config = replace(config, snapshot_dir=str(context.snapshot_root("schema")),
+                             policy_scope_id=context.business_scope_id)
     return config
 
 
@@ -154,6 +164,11 @@ def save_schema_config(config: SchemaSnapshotConfig) -> Path:
     config.validate()
     path = schema_config_path()
     value = asdict(config)
+    from gxp_project_context.context import get_context
+    context = get_context(role="look")
+    if context is not None and context.managed and Path(config.snapshot_dir) == context.snapshot_root("schema"):
+        original = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        value["snapshot_dir"] = original.get("snapshot_dir") or str(default_schema_snapshot_dir())
     # Derived cache namespaces belong to the current connection, not to the
     # user's base preferences. Switching back can reuse that environment's cache.
     directory = Path(config.snapshot_dir)

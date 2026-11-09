@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from gxp_core.cpm_config import CpmConfig
+from gxp_core.cpm_config import CpmConfig, cpm_status_path
 from gxp_core.cpm_runner import CpmRefreshManager, _FileLock
 
 
@@ -66,6 +66,7 @@ class CpmRunnerTests(unittest.TestCase):
                 "gxp_core.cpm_runner.get_cpm_password", return_value="top-secret"
             ), patch.object(CpmRefreshManager, "_run", side_effect=fake_run):
                 report = CpmRefreshManager(config).refresh(force=True, page_identifier="/a")
+                status_text = cpm_status_path(config).read_text(encoding="utf-8")
 
             self.assertTrue(report["ok"], report)
             self.assertEqual(["pull", "login", "pull"], ["login" if "login" in args else "pull" for args, _ in calls])
@@ -73,7 +74,6 @@ class CpmRunnerTests(unittest.TestCase):
                 self.assertNotIn("top-secret", args)
                 self.assertEqual(env["CPM_PASSWORD"], "top-secret")
                 self.assertEqual(env["CPM_ACCOUNT"], "tester")
-            status_text = (root / "local" / "GxpLowcodeReadonly" / "cpm-refresh-status.json").read_text(encoding="utf-8")
             self.assertNotIn("top-secret", status_text)
 
     def test_timeout_keeps_old_snapshot(self) -> None:

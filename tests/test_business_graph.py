@@ -100,17 +100,18 @@ class BusinessGraphTests(unittest.TestCase):
                    json.loads((fixtures / "business_logic_graph_training.json").read_text(encoding="utf-8"))]
         for raw in samples:
             with self.subTest(format=raw.get("format_version", 2)):
-                saved = self.store.upsert(raw)
+                store = BusinessGraphStore(self.store.path, scope_id=raw.get("scope_id", "test"))
+                saved = store.upsert(raw)
                 case_key = raw.get("case_key", saved["relation"]["relation_id"])
-                snapshot = self.store.search(case_key=case_key, scope_id=raw.get("scope_id", "test"))
+                snapshot = store.search(case_key=case_key, scope_id=raw.get("scope_id", "test"))
                 self.assertTrue(snapshot["found"])
                 if raw.get("format_version") == 3:
-                    self.assertEqual(self.store.search(scope_id=raw["scope_id"])["relations"][0]["case_key"], case_key)
+                    self.assertEqual(store.search(scope_id=raw["scope_id"])["relations"][0]["case_key"], case_key)
                 case = snapshot["case_snapshot"]
                 self.assertTrue(case["complete"])
                 self.assertTrue(case["replacement_safe"])
                 self.assertTrue(all(support["lifecycle"] == "active" for support in case["supports"]))
-                result = self.store.upsert(case["relation"], expected_case_snapshot=snapshot["snapshot_token"])
+                result = store.upsert(case["relation"], expected_case_snapshot=snapshot["snapshot_token"])
                 self.assertTrue(result["idempotent"])
 
     def test_case_replacement_preserves_sibling_fact_and_independent_evidence(self):
@@ -170,7 +171,8 @@ class BusinessGraphTests(unittest.TestCase):
         self.assertEqual(empty["snapshot_token"], "")
         self.store.upsert(observation(), expected_case_snapshot="")
         self.assertFalse(self.store.search(case_key="case", environment="production")["found"])
-        self.assertFalse(self.store.search(case_key="case", scope_id="other")["found"])
+        with self.assertRaisesRegex(GraphValidationError, "GRAPH_SCOPE_MISMATCH"):
+            self.store.search(case_key="case", scope_id="other")
         with self.assertRaisesRegex(GraphValidationError, "GRAPH_CASE_SNAPSHOT_CHANGED"):
             self.store.upsert(observation(), expected_case_snapshot="")
 

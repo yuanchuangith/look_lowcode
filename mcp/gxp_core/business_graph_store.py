@@ -82,6 +82,7 @@ class BusinessGraphStore:
     def __init__(self, path: Path | None = None, *, legacy_path: Path | None = None,
                  scope_id: str | None = None, lock_timeout_seconds: float = 5,
                  query_timeout_seconds: float = 5, query_vm_steps: int = 25000000):
+        self._allow_legacy_import = path is not None
         self.path = (path or schema_runtime_root() / "business-graph.sqlite3").resolve()
         self.legacy_path = (legacy_path or self.path.with_name("business-logic-graph.json")).resolve()
         self.scope = _text(scope_id or load_schema_config().policy_scope_id)
@@ -195,6 +196,11 @@ class BusinessGraphStore:
         connection.execute("UPDATE meta SET value=CAST(value AS INTEGER)+1 WHERE key='revision'")
         return int(connection.execute("SELECT value FROM meta WHERE key='revision'").fetchone()[0])
 
+    def _namespace(self, scope_id, environment):
+        if scope_id is not None and scope_id != self.scope:
+            raise GraphValidationError("GRAPH_SCOPE_MISMATCH")
+        return namespace(self.scope, environment)
+
     def _task(self, connection, scope: str, environment: str, reason: str, payload: dict,
               entity_id: str | None = None) -> None:
         task_id = _digest([scope, environment, entity_id, reason, payload])
@@ -209,7 +215,7 @@ class BusinessGraphStore:
                 payload["label"] = _text(item.get("summary", item.get("conclusion", payload["label"])), 1000)
             except GraphValidationError:
                 pass
-        self._task(connection, self.scope, "unknown", "legacy_review_required", payload)
+        self._task(connection, self.scope if self._allow_legacy_import else "legacy-unassigned", "unknown", "legacy_review_required", payload)
 
     def _import_json(self, connection) -> dict:
         report = {"attempted": False, "imported": 0, "skipped": 0, "rejected": 0, "sources": []}
@@ -252,6 +258,12 @@ class BusinessGraphStore:
                         raw = {key: item[key] for key in RELATION_FIELDS if key in item}
                     else:
                         raw = _legacy_relation(item)
+                    if not self._allow_legacy_import:
+                        self._review_legacy(connection, source, index, item, "database_ownership_unproven")
+                        connection.execute("RELEASE legacy_record")
+                        report["skipped"] += 1
+                        report["unassigned"] = report.get("unassigned", 0) + 1
+                        continue
                     normalized = adapt_legacy(raw, self.scope)
                     result = self._put(connection, normalized, lifecycle=item.get("lifecycle", "active"))
                     connection.execute("RELEASE legacy_record")
@@ -384,7 +396,7 @@ class BusinessGraphStore:
 
     def get_case(self, case_key: str, *, scope_id: str | None = None, environment="development") -> dict:
         """Read a complete latest case, including withdrawn supports, for explicit replacement."""
-        scope, environment = namespace(scope_id or self.scope, environment)
+        scope, environment = self._namespace(scope_id, environment)
         case_key = _text(case_key)
         case_id = _digest([scope, environment, case_key])
         with self._transaction() as connection:
@@ -421,6 +433,8 @@ class BusinessGraphStore:
 
     def upsert(self, relation: dict, *, expected_case_snapshot: str | None = None) -> dict:
         normalized = normalize_v3(relation, self.scope) if isinstance(relation, dict) and "format_version" in relation else adapt_legacy(relation, self.scope)
+        if normalized["scope_id"] != self.scope:
+            raise GraphValidationError("GRAPH_SCOPE_MISMATCH")
         if expected_case_snapshot is not None and expected_case_snapshot != "":
             _hash(expected_case_snapshot)
         with self._transaction(write=True) as connection:
@@ -445,8 +459,8 @@ class BusinessGraphStore:
         lifecycle = "invalidated" if reason == "user_confirmed_incorrect" else "stale"
         changed = 0
         with self._transaction(write=True) as connection:
-            rows = connection.execute("SELECT observations.* FROM observations JOIN cases ON cases.id=observations.case_id WHERE cases.scope=? OR cases.id=?",
-                                      (self.scope, relation_id)).fetchall()
+            rows = connection.execute("SELECT observations.* FROM observations JOIN cases ON cases.id=observations.case_id WHERE cases.scope=? AND (cases.id=? OR cases.case_key=?)",
+                                      (self.scope, relation_id, relation_id)).fetchall()
             for row in rows:
                 observation = json.loads(row["body"])
                 public_id = (observation["legacy"] or {}).get("relation_id", observation["case_id"])
@@ -472,7 +486,7 @@ class BusinessGraphStore:
                                                   current_published_designs, current_evidence_fingerprints)):
                 raise GraphValidationError("GRAPH_EXACT_CASE_FILTER_CONFLICT")
             return self.get_case(case_key, scope_id=scope_id, environment=environment)
-        scope, environment = namespace(scope_id or self.scope, environment)
+        scope, environment = self._namespace(scope_id, environment)
         if (type(limit) is not int or not 1 <= limit <= 50 or
                 status is not None and status not in CONFIRMED_STATUSES | LIFECYCLE_STATUSES):
             raise GraphValidationError("GRAPH_INVALID_SEARCH")
@@ -553,7 +567,7 @@ class BusinessGraphStore:
                 pending = [item for item in pending if all(term in _json(item).casefold() for term in query.casefold().split())]
             result = {"available": True, "source": "local_diagnostic_cache", "must_reverify_current_published_copy": True,
                       "reverification": "必须重新核对当前发布副本及当前只读证据。", "migration": migration,
-                      "legacy_review_required": migration["rejected"] > 0 or bool(pending), "pending_review": pending,
+                      "legacy_review_required": migration["rejected"] > 0 or migration.get("unassigned", 0) > 0 or bool(pending), "pending_review": pending,
                       "matched_count": matched_count, "matched_count_complete": True, "relations": [], "count": 0, "truncated": False}
             for relation in matches[:limit]:
                 result["relations"].append(relation)
@@ -754,7 +768,7 @@ class BusinessGraphStore:
     def get_graph(self, *, entity_ids=None, query=None, scope_id=None, environment="development",
                   projection="business", depth=2, include_catalog=False, request_id=None, edge_cursor=None) -> dict:
         from .business_graph_algorithms import neighborhood, project
-        scope, environment = namespace(scope_id or self.scope, environment)
+        scope, environment = self._namespace(scope_id, environment)
         if type(include_catalog) is not bool:
             raise GraphValidationError("GRAPH_INVALID_CATALOG_FLAG")
         if edge_cursor is not None:
@@ -779,7 +793,7 @@ class BusinessGraphStore:
     def trace(self, *, start: str, target=None, direction="downstream", max_depth=8, max_paths=5,
               scope_id=None, environment="development") -> dict:
         from .business_graph_algorithms import paths, project
-        scope, environment = namespace(scope_id or self.scope, environment)
+        scope, environment = self._namespace(scope_id, environment)
         _hash(start)
         if target is not None:
             _hash(target)
@@ -812,7 +826,7 @@ class BusinessGraphStore:
     def analyze(self, *, scope_id=None, environment="development", projection="business",
                 include_catalog=True, entity_ids=None, request_id=None) -> dict:
         from .business_graph_algorithms import adjacency, components, condensation, project, strongly_connected
-        scope, environment = namespace(scope_id or self.scope, environment)
+        scope, environment = self._namespace(scope_id, environment)
         if type(include_catalog) is not bool:
             raise GraphValidationError("GRAPH_INVALID_CATALOG_FLAG")
         expansion = self.expand_catalog(entity_ids=entity_ids, scope_id=scope, environment=environment,
@@ -918,7 +932,7 @@ class BusinessGraphStore:
 
     def expand_catalog(self, *, entity_ids=None, query=None, scope_id=None, environment="development", request_id: str) -> dict:
         from .business_graph_catalog import lookup
-        scope, environment = namespace(scope_id or self.scope, environment)
+        scope, environment = self._namespace(scope_id, environment)
         request_id = _text(request_id)
         started = time.time()
         request_key = _digest([scope, environment, request_id])

@@ -15,6 +15,7 @@ from .cpm_config import (
     CpmConfig,
     _atomic_json,
     cpm_lock_path,
+    bind_cpm_cache,
     cpm_status_path,
     get_cpm_password,
     load_cpm_config,
@@ -42,8 +43,8 @@ def _empty_status() -> dict[str, Any]:
     return {"version": STATUS_VERSION, "full": {}, "pages": {}}
 
 
-def _read_status() -> dict[str, Any]:
-    path = cpm_status_path()
+def _read_status(config=None) -> dict[str, Any]:
+    path = cpm_status_path(config)
     try:
         if path.stat().st_size > MAX_STATUS_BYTES:
             return _empty_status()
@@ -57,8 +58,8 @@ def _read_status() -> dict[str, Any]:
         return _empty_status()
 
 
-def _write_status(status: dict[str, Any]) -> None:
-    _atomic_json(cpm_status_path(), status)
+def _write_status(status: dict[str, Any], config=None) -> None:
+    _atomic_json(cpm_status_path(config), status)
 
 
 class _FileLock(AbstractContextManager["_FileLock"]):
@@ -156,10 +157,10 @@ def _safe_message(value: Any, password: str) -> str:
 
 class CpmRefreshManager:
     def __init__(self, config: CpmConfig | None = None) -> None:
-        self.config = config or load_cpm_config()
+        self.config = bind_cpm_cache(config) if config is not None else load_cpm_config()
 
     def snapshot_status(self) -> dict[str, Any]:
-        status = _read_status()
+        status = _read_status(self.config)
         snapshot = Path(self.config.snapshot_dir)
         return {
             "source": "cpm_snapshot",
@@ -225,7 +226,7 @@ class CpmRefreshManager:
         }
 
     def ensure_fresh(self, page_identifier: str | None = None) -> dict[str, Any]:
-        status = _read_status()
+        status = _read_status(self.config)
         if _is_fresh(self.config, status, page_identifier) and Path(self.config.snapshot_dir).is_dir():
             return self._cached_response(status, page_identifier)
         return self.refresh(force=False, page_identifier=page_identifier)
@@ -249,8 +250,8 @@ class CpmRefreshManager:
         timeout = self.config.timeout_seconds
         started = time.monotonic()
         try:
-            with _FileLock(cpm_lock_path(), timeout):
-                current = _read_status()
+            with _FileLock(cpm_lock_path(self.config), timeout):
+                current = _read_status(self.config)
                 if not force and _is_fresh(self.config, current, page_identifier):
                     return self._cached_response(current, page_identifier)
                 remaining = timeout - (time.monotonic() - started)
@@ -320,7 +321,7 @@ class CpmRefreshManager:
         work_dir = Path(tempfile.mkdtemp(prefix=".cpm-refresh-", dir=snapshot.parent))
         started = time.monotonic()
         try:
-            if snapshot.is_dir():
+            if snapshot.is_dir() and not self.config.fresh_pull:
                 shutil.copytree(snapshot, work_dir, dirs_exist_ok=True)
             legacy_credentials = work_dir / ".cpm" / "credentials.json"
             legacy_credentials.unlink(missing_ok=True)
@@ -335,7 +336,17 @@ class CpmRefreshManager:
                     raise TimeoutError("CPM_REFRESH_TIMEOUT")
                 return value
 
-            if not (work_dir / ".cpm" / "config.json").is_file():
+            native = work_dir / ".cpm" / "config.json"
+            login_required = not native.is_file()
+            if self.config.app_id and self.config.site_out_id:
+                expected = {"url": self.config.platform_url, "apiPrefix": self.config.api_prefix,
+                            "appId": self.config.app_id, "siteOutId": self.config.site_out_id}
+                previous = json.loads(native.read_text(encoding="utf-8")) if native.is_file() else {}
+                if any(previous.get(key) != value for key, value in expected.items()):
+                    (work_dir / ".cpm" / "token.json").unlink(missing_ok=True)
+                    _atomic_json(native, expected)
+                    login_required = True
+            if login_required:
                 self._login(work_dir, env, remaining(), password)
             report = self._pull(work_dir, mode, page_identifier, env, remaining(), password)
             code = report.get("error", {}).get("code") if isinstance(report.get("error"), dict) else None
@@ -390,19 +401,19 @@ class CpmRefreshManager:
         return status.setdefault("full", {})
 
     def _mark_attempt(self, mode: str, page_identifier: str | None) -> None:
-        status = _read_status()
+        status = _read_status(self.config)
         slot = self._state_slot(status, mode, page_identifier)
         slot["last_attempt_at"] = _now()
-        _write_status(status)
+        _write_status(status, self.config)
 
     def _mark_completed(self, mode: str, page_identifier: str | None, report: dict[str, Any]) -> None:
-        status = _read_status()
+        status = _read_status(self.config)
         slot = self._state_slot(status, mode, page_identifier)
         completed = _now()
         slot.update({"last_completed_at": completed, "error": None, "report": report})
         if not report.get("failures"):
             slot["last_clean_at"] = completed
-        _write_status(status)
+        _write_status(status, self.config)
 
     def _failure(
         self,
@@ -414,11 +425,11 @@ class CpmRefreshManager:
     ) -> dict[str, Any]:
         safe = _safe_message(message, password)
         actual_mode = mode or ("page" if page_identifier else "full")
-        status = _read_status()
+        status = _read_status(self.config)
         slot = self._state_slot(status, actual_mode, page_identifier)
         slot["error"] = {"code": code, "message": safe}
         slot.setdefault("last_attempt_at", _now())
-        _write_status(status)
+        _write_status(status, self.config)
         return {
             "source": "cpm_snapshot",
             "ok": False,

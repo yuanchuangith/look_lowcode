@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -51,6 +52,7 @@ def _plugin_payload(staged: Path) -> None:
         "README.md",
         "GXP低代码只读排查使用手册.md",
         "AI-SETUP.md",
+        "切换数据库.cmd",
     ):
         source = PLUGIN_ROOT / name
         if source.exists():
@@ -65,12 +67,13 @@ def _plugin_payload(staged: Path) -> None:
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
-def _replace_plugin(staged: Path, target: Path, parent: Path) -> None:
+def _replace_plugin(staged: Path, target: Path, parent: Path) -> Path | None:
     resolved_parent = parent.resolve()
     target.resolve().relative_to(resolved_parent)
-    backup = parent / f".{target.name}.previous"
-    if backup.exists():
-        shutil.rmtree(backup)
+    staged.resolve().relative_to(resolved_parent)
+    backup = parent / f".{target.name}.backup-{uuid.uuid4().hex}"
+    backup.resolve().relative_to(resolved_parent)
+    had_previous = target.exists()
     if target.exists():
         os.replace(target, backup)
     try:
@@ -79,8 +82,7 @@ def _replace_plugin(staged: Path, target: Path, parent: Path) -> None:
         if backup.exists() and not target.exists():
             os.replace(backup, target)
         raise
-    if backup.exists():
-        shutil.rmtree(backup)
+    return backup if had_previous else None
 
 
 def _marketplace_document() -> dict[str, Any]:
@@ -137,25 +139,31 @@ def _marketplace_roots(codex: str) -> dict[str, Path]:
     return roots
 
 
-def install_plugin() -> dict[str, str | bool]:
-    install_runtime()
+def install_plugin(*, skip_runtime: bool = False) -> dict[str, str | bool]:
+    if skip_runtime:
+        python = runtime_root() / ".venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        if not python.is_file():
+            raise RuntimeError("Existing Look runtime was not found; install without --skip-runtime first")
+        subprocess.run([str(python), "-c", "import mcp, keyring, pymysql"], check=True, capture_output=True)
+    else:
+        install_runtime()
     root = runtime_root() / "codex-marketplace"
+    codex = _codex_command()
+    roots = _marketplace_roots(codex)
+    configured = roots.get(MARKETPLACE_NAME)
+    if configured is not None and configured != root.resolve():
+        raise RuntimeError(f"Marketplace {MARKETPLACE_NAME} already points to {configured}")
     plugin_parent = root / "plugins"
     plugin_parent.mkdir(parents=True, exist_ok=True)
     staged = Path(tempfile.mkdtemp(prefix=f".{PLUGIN_NAME}.install-", dir=plugin_parent))
     try:
         _plugin_payload(staged)
         target = plugin_parent / PLUGIN_NAME
-        _replace_plugin(staged, target, plugin_parent)
+        backup = _replace_plugin(staged, target, plugin_parent)
     finally:
         if staged.exists():
             shutil.rmtree(staged, ignore_errors=True)
     marketplace_created = _ensure_marketplace(root)
-    codex = _codex_command()
-    roots = _marketplace_roots(codex)
-    configured = roots.get(MARKETPLACE_NAME)
-    if configured is not None and configured != root.resolve():
-        raise RuntimeError(f"Marketplace {MARKETPLACE_NAME} already points to {configured}")
     if configured is None:
         _run_codex([codex, "plugin", "marketplace", "add", str(root), "--json"])
     result = _run_codex([codex, "plugin", "add", f"{PLUGIN_NAME}@{MARKETPLACE_NAME}", "--json"])
@@ -165,6 +173,8 @@ def install_plugin() -> dict[str, str | bool]:
         "marketplace": MARKETPLACE_NAME,
         "marketplace_root": str(root),
         "marketplace_created": marketplace_created,
+        "previous_plugin_backup": str(backup) if backup else "",
+        "runtime_reused": skip_runtime,
         "install_result": result.stdout.strip(),
         "next": "Start a new Codex thread so the updated skill and MCP tools are loaded.",
     }
@@ -174,8 +184,9 @@ def install_plugin() -> dict[str, str | bool]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Install Look as a portable local Codex plugin")
-    parser.parse_args()
-    install_plugin()
+    parser.add_argument("--skip-runtime", action="store_true", help="Reuse existing dependencies without changing active Python/CPM runtimes")
+    args = parser.parse_args()
+    install_plugin(skip_runtime=args.skip_runtime)
     return 0
 
 

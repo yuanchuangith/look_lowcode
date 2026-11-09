@@ -39,6 +39,9 @@ Windows：
 python .\scripts\install_codex_plugin.py
 ```
 
+已有运行环境、只更新插件时使用 `python scripts/install_codex_plugin.py --skip-runtime`。
+该模式复用现有依赖，不更新 Python 环境、CPM 命令或平台连接；安装器保留旧插件包备份。
+
 macOS/Linux：
 
 ```bash
