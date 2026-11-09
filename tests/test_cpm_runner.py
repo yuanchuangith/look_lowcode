@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import time
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -91,6 +92,35 @@ class CpmRunnerTests(unittest.TestCase):
             self.assertFalse(report["ok"])
             self.assertEqual("REFRESH_TIMEOUT", report["error"]["code"])
             self.assertEqual("old", (Path(config.snapshot_dir) / "old-marker.txt").read_text(encoding="utf-8"))
+
+    def test_explicit_login_url_uses_native_login_and_preserves_cli_binding(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = replace(self._fixture(Path(directory)), login_url="https://cpm.example/custom/auth",
+                             app_id="fixture-app", site_out_id="fixture-site")
+            root = Path(directory) / "work"
+            with patch("gxp_project_context.platform_auth.request_login", return_value="synthetic-token") as login, \
+                 patch.object(CpmRefreshManager, "_run", side_effect=AssertionError("Custom login uses native HTTP")):
+                CpmRefreshManager(config)._login(root, {}, 3, "synthetic-password")
+            login.assert_called_once_with(config.login_url, config.account, "synthetic-password", timeout=3)
+            binding = json.loads((root / ".cpm" / "config.json").read_text(encoding="utf-8"))
+            self.assertEqual(config.platform_url, binding["url"])
+            self.assertEqual("fixture-app", binding["appId"])
+            self.assertEqual("fixture-site", binding["siteOutId"])
+            self.assertEqual(config.login_url, binding["loginUrl"])
+            token = json.loads((root / ".cpm" / "token.json").read_text(encoding="utf-8"))
+            self.assertEqual("synthetic-token", token["token"])
+            self.assertNotIn("synthetic-password", json.dumps(binding))
+
+    def test_clearing_custom_login_link_requires_fresh_authentication(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = self._fixture(Path(directory))
+            native = Path(config.snapshot_dir) / ".cpm" / "config.json"
+            native.write_text(json.dumps({"url": config.platform_url, "apiPrefix": config.api_prefix,
+                                          "loginUrl": "https://cpm.example/custom/auth"}), encoding="utf-8")
+            with patch("gxp_core.cpm_runner.get_cpm_password", return_value="synthetic-password"), \
+                 patch.object(CpmRefreshManager, "_login", side_effect=RuntimeError("Stop after observing reauthentication")) as login:
+                CpmRefreshManager(config).refresh(force=True)
+            login.assert_called_once()
 
     def test_success_timestamp_drives_ttl_without_using_manifest_pulled_at(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

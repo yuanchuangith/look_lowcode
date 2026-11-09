@@ -82,6 +82,21 @@ class SaveCurrentProjectTests(unittest.TestCase):
         self.get_password.assert_not_called()
         self.set_password.assert_not_called()
 
+    def test_missing_legacy_write_account_identifies_original_connection_without_saving(self):
+        self.write_path.unlink()
+        original = self.look_path.read_bytes()
+        with self.assertRaises(settings.ProjectError) as caught:
+            settings.save_current_project(settings.revision())
+        self.assertEqual("PROJECT_CURRENT_ACCOUNTS_MISSING", caught.exception.code)
+        self.assertIn("原连接缺少 Write 账号", str(caught.exception))
+        self.assertIn("保存项目", str(caught.exception))
+        self.assertEqual(original, self.look_path.read_bytes())
+        self.assertFalse(active_path().exists())
+        self.assertEqual({}, settings.registry()["projects"])
+        self.get_password.assert_not_called()
+        self.set_password.assert_not_called()
+        self.probe.assert_not_called()
+
     def test_existing_targets_are_not_overwritten_and_repeated_save_has_no_duplicate_project(self):
         targets = []
         for number in (1, 2):
@@ -99,6 +114,25 @@ class SaveCurrentProjectTests(unittest.TestCase):
             self.assertEqual(original["revision"], entries[project_id]["revision"])
             self.assertEqual(original, load_profile(project_id, entries[project_id]["revision"]))
         self.assertFalse(active_path().exists())
+
+    def test_login_link_is_saved_for_native_login_and_form_configuration(self):
+        result = settings.save_current_project(settings.revision())
+        original = self.saved_profile(result)
+        fields = ("name", "environment", "database", "accounts", "platform_binding", "platform_version", "refresh")
+        profile = {key: copy.deepcopy(original[key]) for key in fields}
+        url = "https://original-platform.invalid/custom/auth"
+        profile["platform_binding"]["login_url"] = url
+        saved = settings.save_project(profile, settings.revision())
+        binding = self.saved_profile(saved)["platform_binding"]
+        self.assertEqual(url, binding["login_url"])
+        self.assertEqual(url, binding["form_config"]["login_url"])
+        profile["platform_binding"]["form_config"]["login_url"] = url
+        profile["platform_binding"]["login_url"] = ""
+        cleared = self.saved_profile(settings.save_project(profile, settings.revision()))
+        self.assertEqual("", cleared["platform_binding"]["login_url"])
+        self.assertEqual("", cleared["platform_binding"]["form_config"]["login_url"])
+        self.get_password.assert_not_called()
+        self.set_password.assert_not_called()
 
     def test_existing_legacy_active_pointer_is_byte_identical_after_saving(self):
         pointer = {"schema_version": 1, "revision": "b" * 32,

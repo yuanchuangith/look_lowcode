@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from pymysql.err import OperationalError
 from unittest.mock import patch
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -83,6 +84,31 @@ class PagingDatabase:
 
 
 class SchemaRepositoryTests(unittest.TestCase):
+    def test_bulk_index_timeout_falls_back_to_exact_tables_without_hiding_other_errors(self):
+        from gxp_core.db import DatabaseExecutionError
+        database = ScalarDatabase([])
+        database.active.query = lambda *args, **kwargs: ([{"TABLE_NAME": "fixture", "TABLE_TYPE": "BASE TABLE"}], False)
+        repository = SchemaMetadataRepository(database)
+        timeout = DatabaseExecutionError("synthetic timeout")
+        timeout.__cause__ = OperationalError(2013, "synthetic read timeout")
+        with patch.object(repository, "_bulk_columns", return_value={}), \
+             patch.object(repository, "_bulk_indexes", side_effect=timeout), \
+             patch.object(repository, "_indexes", return_value=[{"index_name": "PRIMARY"}]) as indexes, \
+             patch.object(repository, "_bulk_constraints", return_value={}), \
+             patch.object(repository, "_bulk_foreign_keys", return_value={}), \
+             patch.object(repository, "_bulk_checks", return_value={}):
+            result = repository.load_schema()
+        indexes.assert_called_once_with("fixture", deadline=None)
+        self.assertEqual("PRIMARY", result["tables"][0]["indexes"][0]["index_name"])
+
+        denied = DatabaseExecutionError("synthetic permission error")
+        denied.__cause__ = OperationalError(1142, "synthetic permission denied")
+        with patch.object(repository, "_bulk_columns", return_value={}), \
+             patch.object(repository, "_bulk_indexes", side_effect=denied), \
+             patch.object(repository, "_indexes") as fallback:
+            with self.assertRaises(DatabaseExecutionError):
+                repository.load_schema()
+        fallback.assert_not_called()
     def test_generates_only_metadata_candidates_against_unique_targets(self) -> None:
         schema = {
             "tables": [

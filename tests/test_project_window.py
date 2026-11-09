@@ -92,14 +92,18 @@ class ProjectWindowTests(unittest.TestCase):
 
     def test_save_callback_clears_passwords_and_switch_button_uses_selected_project(self):
         self.window.fields["look_password"].set("synthetic-only")
+        self.window.fields["write_user"].set("typed-writer")
+        self.window.fields["write_password"].set("synthetic-write-only")
         with patch("gxp_project_context.window.settings.save_project", return_value={"ok": True, "project_id": "a" * 64}) as save:
             self.button("保存项目").invoke()
             self.pump()
         args, kwargs = save.call_args
         self.assertEqual("Alpha", args[0]["name"])
         self.assertEqual("initial", args[1])
-        self.assertEqual({"look": "synthetic-only"}, kwargs["passwords"])
+        self.assertEqual("typed-writer", args[0]["accounts"]["write"]["user"])
+        self.assertEqual({"look": "synthetic-only", "write": "synthetic-write-only"}, kwargs["passwords"])
         self.assertEqual("", self.window.fields["look_password"].get())
+        self.assertEqual("", self.window.fields["write_password"].get())
         with patch("gxp_project_context.window.settings.switch_project", return_value={"ok": True}) as switch:
             self.button("切换并全量刷新").invoke()
             self.pump()
@@ -114,6 +118,39 @@ class ProjectWindowTests(unittest.TestCase):
             self.button("重试未完成资料").invoke()
             self.pump()
             refresh.assert_called_once_with("initial", retry_failed=True)
+
+    def test_login_link_round_trips_through_selection_copy_and_save(self):
+        url = "https://fixture.invalid/custom/login-api"
+        self.profiles[0]["platform_binding"]["login_url"] = url
+        self.window.selector.current(0)
+        self.window.selected()
+        self.assertEqual(url, self.window.fields["login_url"].get())
+        self.window.copy_project()
+        self.assertEqual(url, self.window.fields["login_url"].get())
+        with patch("gxp_project_context.window.settings.save_project", return_value={"ok": True, "project_id": "a" * 64}) as save:
+            self.window.save()
+            self.pump()
+        self.assertEqual(url, save.call_args.args[0]["platform_binding"]["login_url"])
+
+    def test_new_project_preserves_current_login_link_and_allows_clearing_it(self):
+        self.window.fields["login_url"].set("https://fixture.invalid/custom/login-api")
+        self.window.new_project()
+        self.assertEqual("https://fixture.invalid/custom/login-api", self.window.fields["login_url"].get())
+        self.window.fields["host"].set("new-fixture.invalid")
+        self.window.fields["database"].set("new-fixture")
+        self.window.fields["login_url"].set("")
+        self.assertEqual("", self.window.profile()["platform_binding"]["login_url"])
+
+    def test_legacy_form_login_link_is_loaded_when_top_level_field_is_absent(self):
+        url = "https://fixture.invalid/legacy/auth"
+        binding = self.profiles[0]["platform_binding"]
+        binding["form_config"]["login_url"] = url
+        self.window.selector.current(0)
+        self.window.selected()
+        self.assertEqual(url, self.window.fields["login_url"].get())
+        self.window.fields["login_url"].set("")
+        self.window.apply_platform_defaults({"platform_binding": binding})
+        self.assertEqual(url, self.window.fields["login_url"].get())
 
     def test_copy_keeps_accounts_and_only_needs_new_database_destination(self):
         original_project = self.window.project_id
@@ -177,6 +214,16 @@ class ProjectWindowTests(unittest.TestCase):
         self.backend.assert_not_called()
         self.assertFalse(self.window.background_busy)
 
+    def test_idle_window_detects_a_job_started_from_another_entry(self):
+        self.window._status_snapshot = {"refresh": {"status": "partial"}, "active_edit_sessions": []}
+        self.status["refresh"]["status"] = "fetching"
+        self.backend.reset_mock()
+        for _ in range(5):
+            self.window.refresh_progress()
+        self.pump_background()
+        self.backend.assert_called_once()
+        self.assertEqual("fetching", self.window._status_snapshot["refresh"]["status"])
+
     def test_saved_project_selector_shows_actual_host_and_port(self):
         labels = self.window.selector.cget("values")
         self.assertIn("fixture.invalid:3306/alpha", labels[0])
@@ -187,10 +234,45 @@ class ProjectWindowTests(unittest.TestCase):
         self.window.fields["host"].set("typed-but-not-current.invalid")
         with patch("gxp_project_context.window.settings.save_current_project", return_value={"ok": True, "project_id": "a" * 64}) as save_current, \
              patch("gxp_project_context.window.settings.save_project", side_effect=AssertionError("Do not save the target form")):
-            self.button("保存当前连接").invoke()
+            self.button("将原连接加入列表").invoke()
             self.pump()
         save_current.assert_called_once_with("initial")
-        self.assertEqual("a" * 64, self.window.project_id)
+        self.assertEqual("b" * 64, self.window.project_id)
+        self.assertEqual("typed-but-not-current.invalid", self.window.fields["host"].get())
+
+    def test_registering_original_connection_preserves_unsaved_new_project_and_passwords(self):
+        self.window.new_project()
+        for key, value in {"name": "Unsaved target", "host": "new-target.invalid", "database": "target",
+                           "write_user": "typed-writer", "look_password": "synthetic-look-only",
+                           "write_password": "synthetic-write-only", "platform_password": "synthetic-platform-only"}.items():
+            self.window.fields[key].set(value)
+        before = {key: variable.get() for key, variable in self.window.fields.items()}
+        def registered(expected):
+            self.assertEqual("initial", expected)
+            self.status["revision"] = "after-registration"
+            self.status["projects"] = list(reversed(self.profiles))
+            return {"ok": True, "project_id": "a" * 64}
+        with patch("gxp_project_context.window.settings.save_current_project", side_effect=registered), \
+             patch("gxp_project_context.window.settings.save_project", side_effect=AssertionError("Do not save target form")):
+            self.button("将原连接加入列表").invoke()
+            self.pump()
+        self.assertEqual(before, {key: variable.get() for key, variable in self.window.fields.items()})
+        self.assertEqual("", self.window.project_id)
+        self.assertEqual("新增项目", self.window.selector.get())
+        self.assertEqual("after-registration", self.window.revision)
+        self.assertIn("原连接已加入项目列表", self.window.message.get())
+
+    def test_original_connection_error_keeps_new_project_inputs(self):
+        self.window.new_project()
+        self.window.fields["write_user"].set("typed-writer")
+        self.window.fields["write_password"].set("synthetic-write-only")
+        failure = "正在使用的原连接缺少 Write 账号，请点击“保存项目”保存当前填写的内容。"
+        with patch("gxp_project_context.window.settings.save_current_project", return_value={"ok": False, "error": failure}):
+            self.button("将原连接加入列表").invoke()
+            self.pump()
+        self.assertEqual(failure, self.window.message.get())
+        self.assertEqual("typed-writer", self.window.fields["write_user"].get())
+        self.assertEqual("synthetic-write-only", self.window.fields["write_password"].get())
 
     def test_unchanged_status_does_not_clear_or_redraw_progress_text(self):
         self.window.render_progress(copy.deepcopy(self.status))
@@ -198,6 +280,23 @@ class ProjectWindowTests(unittest.TestCase):
             self.window.render_progress(copy.deepcopy(self.status))
         clear.assert_not_called()
         insert.assert_not_called()
+
+    def test_completed_refresh_shows_final_state_and_duration(self):
+        status = copy.deepcopy(self.status)
+        status["refresh"].update(started_at="2026-11-09T12:00:00+00:00",
+                                 completed_at="2026-11-09T12:00:10+00:00")
+        self.window.render_progress(status)
+        text = self.window.progress.get("1.0", "end")
+        self.assertIn("本次耗时：0分10秒", text)
+        self.assertIn("本次刷新已结束", text)
+        self.assertIn("MODEL_MISSING", text)
+
+    def test_resource_start_is_visible_before_collection_finishes(self):
+        status = copy.deepcopy(self.status)
+        status["refresh"] = {"status": "fetching", "resources": {"schema": {"status": "fetching"}}}
+        self.window.render_progress(status)
+        text = self.window.progress.get("1.0", "end")
+        self.assertIn("schema：正在获取", text)
 
     def test_stale_background_result_cannot_unlock_foreground_or_replace_message(self):
         old_epoch = self.window._view_epoch
