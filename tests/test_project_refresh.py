@@ -53,6 +53,19 @@ class ProjectRefreshTests(unittest.TestCase):
         self.assertEqual([], json.loads((self.ctx.snapshot_root("schema") / "relations/verified.json").read_text(encoding="utf-8")))
         self.assertEqual(1, result["counts"]["tables"])
 
+    def test_cpm_cli_failure_keeps_a_bounded_diagnostic_reason(self):
+        base = CpmConfig("https://fixture.invalid", "actor", str(self.root / "node"),
+                         str(self.root / "cli"), str(self.root / "snapshot"))
+        failure = {"ok": False, "error": {"code": "REFRESH_FAILED", "message": "GET /api/models timed out"},
+                   "failures": [{"type": "REFRESH_FAILED", "reason": "GET /api/models timed out"}]}
+        with patch("gxp_project_context._collectors.cpm_config.load_cpm_config", return_value=base), \
+             patch("gxp_project_context._collectors.cpm_runner.CpmRefreshManager") as manager:
+            manager.return_value.refresh.return_value = failure
+            result = worker.collect_cpm(self.ctx, time.monotonic() + 5)
+        self.assertEqual("REFRESH_FAILED", result["error_code"])
+        self.assertEqual("GET /api/models timed out", result["reason"])
+        self.assertEqual(failure["failures"], result["failures"])
+
     def test_metadata_transport_wait_does_not_raise_server_query_limit(self):
         database = worker._database(self.ctx)
         self.assertEqual(30, database.config.read_timeout_seconds)
@@ -94,6 +107,53 @@ class ProjectRefreshTests(unittest.TestCase):
         self.assertEqual("ready", result["objects"]["page:form"]["status"])
         self.assertEqual("fixture-platform-reference", bound.credential_target)
         self.assertTrue(bound.fresh_pull)
+
+    def test_cpm_health_can_prove_complete_page_accounting_with_deleted_residuals(self):
+        snapshot = self.ctx.snapshot_root("cpm")
+        page = snapshot / "pages/a"
+        page.mkdir(parents=True)
+        (page / "page-meta.json").write_text(json.dumps({"route": "form", "id": "page",
+            "designSource": {"version": "draft", "appId": "app", "siteOutId": "site"}}), encoding="utf-8")
+        health = {"pages": {"total": 3, "ok": 2, "degraded": 0, "deleted": 1}}
+        deleted = {"type": "pages-deleted", "id": "pages", "reason": "stale catalog entry"}
+        (snapshot / "manifest.json").write_text(json.dumps({"health": health, "failures": [deleted]}), encoding="utf-8")
+        base = CpmConfig("https://fixture.invalid", "actor", str(self.root / "node"),
+                         str(self.root / "cli"), str(snapshot))
+        with patch("gxp_project_context._collectors.cpm_config.load_cpm_config", return_value=base), \
+             patch("gxp_project_context._collectors.cpm_runner.CpmRefreshManager") as manager:
+            manager.return_value.refresh.return_value = {"ok": True, "complete": False,
+                "health": health, "failures": [deleted], "counts": {"pages": 2}, "objects": {}}
+            result = worker.collect_cpm(self.ctx, time.monotonic() + 5)
+
+        self.assertEqual("ready", result["status"])
+        self.assertTrue(result["complete"])
+        self.assertEqual([deleted], result["failures"])
+        saved = json.loads((snapshot / "manifest.json").read_text(encoding="utf-8"))
+        self.assertTrue(saved["complete"])
+
+    def test_cpm_retry_reuses_matching_committed_snapshot_with_only_deleted_residuals(self):
+        snapshot = self.ctx.snapshot_root("cpm")
+        snapshot.mkdir(parents=True)
+        health = {"pages": {"total": 1, "ok": 0, "degraded": 0, "deleted": 1}}
+        deleted = [{"type": "pages-deleted", "id": "pages", "reason": "stale catalog entry"}]
+        counts = {"pages": 0}
+        manifest = {"project_binding": self.ctx.binding(), "database_scope": self.ctx.database_scope,
+            "refresh_generation": self.ctx.refresh_generation, "platform": {"url": "https://fixture.invalid", "appId": "app"},
+            "counts": counts, "health": health, "failures": deleted, "pulledAt": "2026-11-10T03:00:00Z"}
+        (snapshot / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+        base = CpmConfig("https://fixture.invalid", "actor", str(self.root / "node"),
+                         str(self.root / "cli"), str(snapshot))
+        report = {"ok": True, "outDir": str(snapshot), "counts": counts, "health": health, "failures": deleted}
+        with patch("gxp_project_context._collectors.cpm_config.load_cpm_config", return_value=base), \
+             patch("gxp_project_context._collectors.cpm_runner.CpmRefreshManager") as manager:
+            manager.return_value.snapshot_status.return_value = {"cli_version": "0.3.2",
+                "refresh_status": {"full": {"error": None, "last_completed_at": "2026-11-10T03:00:01Z", "report": report}}}
+            result = worker.collect_cpm(self.ctx, time.monotonic() + 5)
+        manager.return_value.refresh.assert_not_called()
+        self.assertEqual("ready", result["status"])
+        self.assertTrue(result["complete"])
+        saved = json.loads((snapshot / "manifest.json").read_text(encoding="utf-8"))
+        self.assertTrue(saved["complete"])
 
     def test_failed_only_selection_does_not_replace_successful_resource_classes(self):
         successful = self.ctx.snapshot_root("schema") / "manifest.json"
@@ -184,6 +244,49 @@ class ProjectRefreshTests(unittest.TestCase):
             changed = True
             with self.assertRaisesRegex(ValueError, "ACTION_DESIGN_CHANGED_DURING_REFRESH"):
                 worker.collect_actions(self.ctx, time.monotonic() + 5)
+
+    def test_action_design_metadata_uses_bounded_four_row_batches(self):
+        from contextlib import contextmanager
+        metadata = [{"design_id": f"d{i}", "ref_id": f"r{i}", "is_publish": False,
+                     "is_deleted": 0, "modified_time": str(i), "created_time": str(i)}
+                    for i in range(8)]
+        metadata_batch_sizes = []
+
+        class Session:
+            def query(self, sql, params, max_rows):
+                if "cpm_public_flows" in sql or "cpm_bizflows`" in sql:
+                    return [], False
+                if " IN (" not in sql:
+                    return [{"design_id": row["design_id"]} for row in metadata], False
+                ids = set(params.values())
+                rows = [dict(row) for row in metadata if row["design_id"] in ids]
+                if "HASHES" in sql:
+                    return [{**row, "data_sha256": "a" * 64, "csharp_sha256": "b" * 64}
+                            for row in rows], False
+                metadata_batch_sizes.append(len(ids))
+                return rows, False
+
+        class Database:
+            @contextmanager
+            def session(self, **kwargs):
+                yield Session()
+
+        class Repository:
+            def __init__(self, db):
+                pass
+
+            def _design_select(self, include_content, include_hashes):
+                return ("HASHES" if include_hashes else "METADATA", {key: key for key in
+                        ("design_id", "ref_id", "is_publish", "is_deleted", "modified_time", "created_time")})
+
+            def _design_row(self, row, **kwargs):
+                return {**row, "version": "published" if row["is_publish"] else "draft"}
+
+        with patch.object(worker, "_database", return_value=Database()), \
+             patch("gxp_project_context._collectors.repository.GxpRepository", Repository):
+            result = worker.collect_actions(self.ctx, time.monotonic() + 5)
+        self.assertEqual([4, 4], metadata_batch_sizes)
+        self.assertEqual(8, result["counts"]["designs"])
 
     def test_cpm_fresh_pull_preserves_explicit_application_binding_without_old_business_files(self):
         from gxp_project_context._collectors.cpm_runner import CpmRefreshManager

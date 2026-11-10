@@ -93,6 +93,30 @@ class CpmRunnerTests(unittest.TestCase):
             self.assertEqual("REFRESH_TIMEOUT", report["error"]["code"])
             self.assertEqual("old", (Path(config.snapshot_dir) / "old-marker.txt").read_text(encoding="utf-8"))
 
+    def test_snapshot_commit_removes_previous_with_long_nested_paths(self) -> None:
+        from gxp_core.cpm_runner import _filesystem_path
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            snapshot = root / "snapshot"
+            snapshot.mkdir()
+            (snapshot / "old-marker.txt").write_text("old", encoding="utf-8")
+            backup = root / ".snapshot.previous"
+            nested = backup
+            for index in range(6):
+                nested /= f"directory-{index}-" + ("x" * 38)
+            os.makedirs(_filesystem_path(nested), exist_ok=True)
+            long_file = nested / ("page-" + "y" * 50 + ".json")
+            with open(_filesystem_path(long_file), "w", encoding="utf-8") as stream:
+                stream.write("old")
+            work = root / "refresh-work"
+            work.mkdir()
+            (work / "new-marker.txt").write_text("new", encoding="utf-8")
+
+            CpmRefreshManager._commit_snapshot(snapshot, work)
+
+            self.assertEqual("new", (snapshot / "new-marker.txt").read_text(encoding="utf-8"))
+            self.assertFalse(backup.exists())
+
     def test_explicit_login_url_uses_native_login_and_preserves_cli_binding(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             config = replace(self._fixture(Path(directory)), login_url="https://cpm.example/custom/auth",

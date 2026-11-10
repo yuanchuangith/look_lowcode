@@ -84,6 +84,27 @@ class PagingDatabase:
 
 
 class SchemaRepositoryTests(unittest.TestCase):
+    def test_bulk_column_timeout_falls_back_to_exact_table_queries(self):
+        from gxp_core.db import DatabaseExecutionError
+        database = ScalarDatabase([])
+        database.active.query = lambda *args, **kwargs: ([
+            {"TABLE_NAME": "first", "TABLE_TYPE": "BASE TABLE"},
+            {"TABLE_NAME": "second", "TABLE_TYPE": "BASE TABLE"},
+        ], False)
+        repository = SchemaMetadataRepository(database)
+        timeout = DatabaseExecutionError("synthetic timeout")
+        timeout.__cause__ = OperationalError(3024, "synthetic query timeout")
+        with patch.object(repository, "_bulk_columns", side_effect=timeout), \
+             patch.object(repository, "_columns", side_effect=lambda name, deadline=None: [{"column_name": name}]) as columns, \
+             patch.object(repository, "_bulk_indexes", return_value={}), \
+             patch.object(repository, "_bulk_constraints", return_value={}), \
+             patch.object(repository, "_bulk_foreign_keys", return_value={}), \
+             patch.object(repository, "_bulk_checks", return_value={}):
+            result = repository.load_schema()
+        self.assertEqual(["first", "second"], [call.args[0] for call in columns.call_args_list])
+        self.assertEqual([[{"column_name": "first"}], [{"column_name": "second"}]],
+                         [item["columns"] for item in result["tables"]])
+
     def test_bulk_index_timeout_falls_back_to_exact_tables_without_hiding_other_errors(self):
         from gxp_core.db import DatabaseExecutionError
         database = ScalarDatabase([])
