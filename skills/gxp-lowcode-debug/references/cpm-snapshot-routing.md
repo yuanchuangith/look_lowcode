@@ -22,6 +22,7 @@
 - 用户说“重新拉取／刷新”或“保存草稿后再看看”时调用 `refresh_cpm_snapshot(page_identifier=...)`，默认 `force=true`，跳过90分钟缓存。只有明确允许复用缓存时才传 `force=false`。刷新只写 `%LOCALAPPDATA%` 下本地快照。
 - 初次从旧来源快照切换时，单页更新会要求全量基线；包装层自动重试全量。全量拉取失败保留的旧页仍使用原来源标记，不得当作本次已验证草稿。
 - 刷新失败或 300 秒超时时保留旧快照。响应中的 `failures`、`refreshed_at`、`refresh_mode` 和 `cli_version` 必须进入证据说明。
+- 单页刷新会先复制旧基线到临时目录；Windows 复制与清理均使用扩展路径。`WinError 206/3` 属于本机路径故障，不能据此判断页面或控件不存在。HTTP 401/403、登录重定向及 DataResult 中的认证错误应进入重新登录流程，不能误报为 `DRAFT_VERSION_UNAVAILABLE`；平台确实未返回开发版本时仍停止读取，不沿用旧版本号。
 - 查询刷新失败且旧快照结构可用时，直接返回 `stale=true`、`stale_reason`、`evidence_scope=snapshot_candidates_only` 与缺口说明；没有可用旧快照仍报错。零命中不能证明当前平台不存在。额外补查按 [有限补查](diagnostic-fallback.md) 执行，不能把默认刷新超时当作30秒补查预算。
 - CPM、Schema、源码索引刷新相互独立；调用源码工具不会自动刷新 CPM 或 Schema，也不会执行开发库全量关系验证。CPM 刷新只改本地文件，不修改平台设计、发布状态或业务数据。
 

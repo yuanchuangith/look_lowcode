@@ -1,6 +1,7 @@
 // 平台 HTTP 客户端：路径重写 / 认证头 / 错误分类 / GET 重试。
 // 移植自 D:\code\test\src\tools\action-design-tools\api-client.ts（实证结论保留在注释中）。
 import axios from 'axios';
+import { detectPlatformError, isPermanentPlatformError } from './error-shape.js';
 /** 服务不可用：5xx/401/403/无响应。调用方对 GET 可重试，认证失败（status 401/403）应指引重新 login。 */
 export class ServiceUnavailableError extends Error {
     unavailable = true;
@@ -61,11 +62,28 @@ export async function platformGet(ctx, apiPrefix, path, params = undefined) {
     for (let attempt = 0;; attempt++) {
         try {
             const resp = await axios.get(url, {
-                params, timeout: 30000, headers: buildHeaders(ctx), validateStatus: undefined,
+                params, timeout: 30000, headers: buildHeaders(ctx), maxRedirects: 0,
+                validateStatus: status => status >= 200 && status < 300,
             });
+            // GXP can also use a DataResult envelope with HTTP 200. Do not
+            // misreport an expired session as a missing development version.
+            const applicationStatus = resp.data?.statusCode;
+            if (applicationStatus === 401 || applicationStatus === 403)
+                throw new ServiceUnavailableError('平台登录已失效，请重新登录后读取。', applicationStatus);
             return resp.data;
         }
         catch (error) {
+            if (error instanceof ServiceUnavailableError)
+                throw error;
+            const status = error?.response?.status;
+            if (status === 401 || status === 403)
+                throw toUnavailableError(url, 'GET', error);
+            const platformError = detectPlatformError(error?.response?.data);
+            if (platformError && isPermanentPlatformError(platformError))
+                throw new Error(platformError);
+            if (status >= 300 && status < 400
+                && /(?:login|sign[-_]?in|auth)/i.test(String(error?.response?.headers?.location ?? '')))
+                throw new ServiceUnavailableError('平台要求重新登录，未跟随登录重定向。', 401);
             if (!isServiceUnavailable(error)) {
                 // 业务类 4xx：带状态码与响应摘要抛普通错误，便于定位但不触发重试
                 const status = error?.response?.status;

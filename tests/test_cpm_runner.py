@@ -19,6 +19,15 @@ def completed(args: list[str], payload: dict, code: int = 0) -> subprocess.Compl
 
 
 class CpmRunnerTests(unittest.TestCase):
+    def setUp(self) -> None:
+        # Test snapshots are explicit fixtures, never the developer's active
+        # project generation or real platform connection.
+        self.addCleanup(patch.stopall)
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        patch.dict(os.environ, {"LOCALAPPDATA": temporary.name}).start()
+        patch("gxp_core.cpm_runner.bind_cpm_cache", side_effect=lambda config: config).start()
+
     def _fixture(self, root: Path) -> CpmConfig:
         cli_root = root / "cpm-cli" / "0.3.1"
         cli = cli_root / "dist" / "cli.js"
@@ -116,6 +125,38 @@ class CpmRunnerTests(unittest.TestCase):
 
             self.assertEqual("new", (snapshot / "new-marker.txt").read_text(encoding="utf-8"))
             self.assertFalse(backup.exists())
+
+    def test_single_page_refresh_copies_long_paths_and_preserves_other_resources(self) -> None:
+        from gxp_core.cpm_runner import _filesystem_path
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = self._fixture(root)
+            relative = Path("interfaces")
+            for index in range(6):
+                relative /= f"directory-{index}-" + ("测" * 38)
+            relative /= "用户管理API文档.json"
+            original = Path(config.snapshot_dir) / relative
+            os.makedirs(_filesystem_path(original.parent), exist_ok=True)
+            with open(_filesystem_path(original), "w", encoding="utf-8") as stream:
+                stream.write('{"preserve": true}')
+
+            def pull(work, mode, page, env, timeout, password):
+                self.assertEqual((mode, page), ("page", "/a"))
+                with open(_filesystem_path(work / relative), encoding="utf-8") as stream:
+                    self.assertEqual(json.load(stream), {"preserve": True})
+                return {"ok": True, "mode": "page", "failures": [], "error": None}
+
+            try:
+                with patch("gxp_core.cpm_runner.get_cpm_password", return_value="synthetic-password"), \
+                     patch.object(CpmRefreshManager, "_pull", side_effect=pull):
+                    result = CpmRefreshManager(config).refresh(force=True, page_identifier="/a")
+                self.assertTrue(result["ok"], result)
+                with open(_filesystem_path(original), encoding="utf-8") as stream:
+                    self.assertEqual(json.load(stream), {"preserve": True})
+                self.assertFalse(list(root.glob(".cpm-refresh-*")))
+            finally:
+                import shutil
+                shutil.rmtree(_filesystem_path(Path(config.snapshot_dir)))
 
     def test_explicit_login_url_uses_native_login_and_preserves_cli_binding(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
