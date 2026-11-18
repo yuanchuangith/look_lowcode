@@ -147,6 +147,59 @@ class SaveCurrentProjectTests(unittest.TestCase):
         self.assertEqual(self.write["account_mode"], self.saved_profile(result)["accounts"]["write"]["account_mode"])
         self.assertFalse(get_context().managed)
 
+    def save_target(self):
+        return settings.save_project({"name": "Target", "database": {"host": "target.invalid", "port": 3306,
+            "database": "target"}, "accounts": {"look": {"user": "reader", "credential_target": "fixture.look"},
+            "write": {"user": "writer", "credential_target": "fixture.write"}}}, settings.revision())
+
+    def test_removing_inactive_project_keeps_profile_cache_and_other_projects(self):
+        legacy = settings.save_current_project(settings.revision())
+        target = self.save_target()
+        target_id = target["project_id"]
+        original = self.saved_profile(target)
+        cache = self.root / "runtime" / target_id / "snapshot.json"
+        atomic_json(cache, {"fixture": True})
+        with patch.object(settings, "active_sessions", return_value=[{"database_scope": legacy["project_id"]}]), \
+                patch("keyring.delete_password", side_effect=AssertionError("Credentials must be retained")):
+            result = settings.remove_project(target_id, target["revision"])
+        self.assertTrue(result["removed"])
+        self.assertEqual(settings.revision(), result["revision"])
+        self.assertEqual([legacy["project_id"]], [row["project_id"] for row in settings.list_projects()["projects"]])
+        self.assertEqual(original, load_profile(target_id, result["profile_revision"]))
+        self.assertTrue(cache.is_file())
+        self.get_password.assert_not_called()
+        self.set_password.assert_not_called()
+        self.probe.assert_not_called()
+
+    def test_removing_active_legacy_project_is_rejected(self):
+        result = settings.save_current_project(settings.revision())
+        with self.assertRaises(settings.ProjectError) as caught:
+            settings.remove_project(result["project_id"], result["revision"])
+        self.assertEqual("PROJECT_ACTIVE", caught.exception.code)
+        self.assertEqual(result["revision"], settings.revision())
+
+    def test_removing_active_managed_project_is_rejected(self):
+        target = self.save_target()
+        atomic_json(active_path(), {"schema_version": 2, "project_id": target["project_id"],
+            "profile_revision": target["profile_revision"], "activation_id": "a" * 32, "refresh_generation": "b" * 32})
+        expected = settings.revision()
+        with self.assertRaises(settings.ProjectError) as caught:
+            settings.remove_project(target["project_id"], expected)
+        self.assertEqual("PROJECT_ACTIVE", caught.exception.code)
+        self.assertEqual(expected, settings.revision())
+
+    def test_removing_project_with_stale_revision_unknown_id_or_unfinished_flow_is_rejected(self):
+        target = self.save_target()
+        target_id = target["project_id"]
+        with patch.object(settings, "active_sessions", return_value=[{"database_scope": target_id}]):
+            for requested, expected, code in ((target_id, "stale", "PROJECT_CONFIG_CONFLICT"),
+                    ("f" * 64, target["revision"], "PROJECT_NOT_FOUND"),
+                    (target_id, target["revision"], "PROJECT_ACTIVE_SESSIONS")):
+                with self.subTest(code=code), self.assertRaises(settings.ProjectError) as caught:
+                    settings.remove_project(requested, expected)
+                self.assertEqual(code, caught.exception.code)
+        self.assertEqual(target["revision"], settings.revision())
+
 
 if __name__ == "__main__":
     unittest.main()

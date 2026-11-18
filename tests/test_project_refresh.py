@@ -70,6 +70,47 @@ class ProjectRefreshTests(unittest.TestCase):
         self.assertEqual("GET /api/models timed out", result["reason"])
         self.assertEqual(failure["failures"], result["failures"])
 
+    def test_action_refresh_errors_keep_stable_phase_and_user_reason(self):
+        with patch.object(worker, "collect_actions", side_effect=worker._action_error(
+            "ACTION_DESIGN_PAGINATION_INVALID", "design_ids"
+        )) as collect:
+            result = worker.run_collectors(self.ctx, resource_names={"actions"})["resources"]["actions"]
+        collect.assert_called_once()
+        self.assertEqual("ACTION_DESIGN_PAGINATION_INVALID", result["error_code"])
+        self.assertEqual("design_ids", result["stage"])
+        self.assertIn("分页游标", result["reason"])
+
+    def test_action_ids_follow_database_collation_and_reject_repeat(self):
+        code, phase = "ACTION_DESIGN_PAGINATION_INVALID", "design_ids"
+        seen = set()
+        first = worker._action_page_ids([{"id": "a"}, {"id": "b"}], "id", seen, code, phase)
+        second = worker._action_page_ids([{"id": "C"}, {"id": "D"}], "id", seen, code, phase)
+        self.assertLess(second[-1], first[-1])  # Python's ordering disagrees with the database.
+        self.assertEqual({"a", "b", "C", "D"}, seen)
+        with self.assertRaisesRegex(worker.ActionRefreshError, code):
+            worker._action_page_ids([{"id": "D"}], "id", seen, code, phase)
+
+    def test_action_refresh_retries_design_drift_once_without_renewing_deadline(self):
+        with patch.object(worker, "collect_actions", side_effect=[
+            worker._action_error("ACTION_DESIGN_CHANGED_DURING_REFRESH", "design_metadata"),
+            worker._action_error("ACTION_DESIGN_CHANGED_DURING_REFRESH", "current_design_fingerprint"),
+        ]) as collect:
+            result = worker.run_collectors(self.ctx, resource_names={"actions"})["resources"]["actions"]
+        self.assertEqual(2, collect.call_count)
+        self.assertEqual(collect.call_args_list[0].args[1], collect.call_args_list[1].args[1])
+        self.assertEqual("ACTION_DESIGN_CHANGED_DURING_REFRESH", result["error_code"])
+        self.assertEqual("current_design_fingerprint", result["stage"])
+
+    def test_action_refresh_unknown_error_does_not_expose_raw_value_error(self):
+        class Broken:
+            def __call__(self, *args, **kwargs):
+                raise ValueError("secret table name or connection detail")
+        with patch.object(worker, "collect_actions", Broken()):
+            result = worker.run_collectors(self.ctx, resource_names={"actions"})
+        action = result["resources"]["actions"]
+        self.assertEqual("ACTION_REFRESH_FAILED", action["error_code"])
+        self.assertNotIn("secret table", action["reason"])
+
     def test_metadata_transport_wait_does_not_raise_server_query_limit(self):
         database = worker._database(self.ctx)
         self.assertEqual(30, database.config.read_timeout_seconds)

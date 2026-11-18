@@ -42,7 +42,8 @@ class ProjectWindowTests(unittest.TestCase):
             self.skipTest("Tk display is unavailable: " + str(exc))
         self.addCleanup(self.root.destroy)
         self.profiles = [self.profile("a", "Alpha"), self.profile("b", "Beta")]
-        self.status = {"ok": True, "revision": "initial", "active_project_name": "Alpha", "active_edit_sessions": [],
+        self.status = {"ok": True, "revision": "initial", "active_project_name": "Alpha",
+                       "active_project_id": self.profiles[0]["project_id"], "active_edit_sessions": [],
                        "projects": self.profiles, "refresh": {"status": "partial", "resources": {
                            "schema": {"status": "ready"}, "cpm": {"status": "partial", "error_code": "MODEL_MISSING", "failures": [{"type": "model", "id": "fixture"}]}}}}
         self.backend = self.enterContext(patch("gxp_project_context.window.settings.settings_status", side_effect=lambda: copy.deepcopy(self.status)))
@@ -66,14 +67,18 @@ class ProjectWindowTests(unittest.TestCase):
             time.sleep(0.005)
         self.assertFalse(self.window.busy, "Window background callback did not finish")
 
-    def button(self, label):
-        pending = [self.root]
+    def button(self, label, parent=None):
+        pending = [self.root if parent is None else parent]
         while pending:
             widget = pending.pop()
             if widget.winfo_class() == "TButton" and widget.cget("text") == label:
                 return widget
             pending.extend(widget.winfo_children())
         self.fail("Button missing: " + label)
+
+    def dialog(self, title):
+        return next((widget for widget in self.root.winfo_children()
+                     if isinstance(widget, tk.Toplevel) and widget.title() == title), None)
 
     def test_hidden_window_selection_new_project_and_progress(self):
         self.assertEqual("withdrawn", self.root.state())
@@ -227,6 +232,108 @@ class ProjectWindowTests(unittest.TestCase):
     def test_saved_project_selector_shows_actual_host_and_port(self):
         labels = self.window.selector.cget("values")
         self.assertIn("fixture.invalid:3306/alpha", labels[0])
+
+    def test_active_marker_is_independent_of_selection_and_moves_after_switch(self):
+        def markers():
+            return [label.startswith("【当前生效】") for label in self.window.selector.cget("values")]
+
+        alpha, beta = [profile["project_id"] for profile in self.profiles]
+        self.assertEqual([True, False], markers())
+        self.window.selector.current(1)
+        self.window.selected()
+        self.assertEqual(beta, self.window.project_id)
+        self.assertEqual([True, False], markers())
+
+        def switched(project_id, revision):
+            self.assertEqual((beta, "initial"), (project_id, revision))
+            self.status.update(active_project_id=beta, active_project_name="Beta", revision="switched")
+            return {"ok": True, "project_id": beta}
+
+        with patch("gxp_project_context.window.settings.switch_project", side_effect=switched):
+            self.button("切换并全量刷新").invoke()
+            self.pump()
+        self.assertEqual([False, True], markers())
+        self.assertEqual(1, self.window.selector.current())
+        self.assertIn("Beta", self.window.current.get())
+        self.assertNotEqual(alpha, self.window.project_id)
+
+    def test_background_active_marker_update_keeps_the_target_form(self):
+        self.window.selector.current(1)
+        self.window.selected()
+        self.window.fields["look_password"].set("typed-password")
+        self.window.fields["host"].set("typed-target.invalid")
+        self.window.message.set("目标表单尚未保存")
+        self.status.update(active_project_id=self.profiles[1]["project_id"], active_project_name="Beta",
+                           revision="background-update")
+        self.window.run("progress", lambda: copy.deepcopy(self.status))
+        self.pump_background()
+        labels = self.window.selector.cget("values")
+        self.assertFalse(labels[0].startswith("【当前生效】"))
+        self.assertTrue(labels[1].startswith("【当前生效】"))
+        self.assertEqual(1, self.window.selector.current())
+        self.assertEqual("typed-password", self.window.fields["look_password"].get())
+        self.assertEqual("typed-target.invalid", self.window.fields["host"].get())
+        self.assertEqual("目标表单尚未保存", self.window.message.get())
+        self.assertEqual("initial", self.window.revision)
+
+    def test_failed_selection_restores_the_loaded_target(self):
+        self.window.selector.current(1)
+        with patch("gxp_project_context.window.load_profile", side_effect=ValueError):
+            self.assertFalse(self.window.selected())
+        self.assertEqual(0, self.window.selector.current())
+        self.assertEqual(self.profiles[0]["project_id"], self.window.project_id)
+        self.assertEqual("alpha", self.window.fields["database"].get())
+        self.assertIn("所选项目配置无法加载", self.window.message.get())
+
+    def test_remove_requires_second_button_confirmation_and_reselects_active(self):
+        self.window.selector.current(1)
+        self.assertTrue(self.window.selected())
+        beta = self.profiles[1]["project_id"]
+
+        def remove(project_id, revision):
+            self.assertEqual((beta, "initial"), (project_id, revision))
+            self.status.update(projects=self.profiles[:1], revision="removed")
+            return {"ok": True, "removed": True, "project_id": beta, "revision": "removed"}
+
+        title = "再次确认移除"
+        with patch("gxp_project_context.window.messagebox.askyesno", side_effect=[False, True, True]) as ask, \
+                patch("gxp_project_context.window.settings.remove_project", side_effect=remove) as backend:
+            self.button("移除所选配置").invoke()
+            self.assertIsNone(self.dialog(title))
+            backend.assert_not_called()
+            self.assertEqual(beta, self.window.project_id)
+
+            self.button("移除所选配置").invoke()
+            self.root.update_idletasks()
+            dialog = self.dialog(title)
+            self.assertIsNotNone(dialog)
+            self.button("取消", parent=dialog).invoke()
+            self.assertIsNone(self.dialog(title))
+            backend.assert_not_called()
+
+            self.button("移除所选配置").invoke()
+            self.root.update_idletasks()
+            dialog = self.dialog(title)
+            self.assertIsNotNone(dialog)
+            backend.assert_not_called()
+            self.button("确认移除", parent=dialog).invoke()
+            self.pump()
+        self.assertIn("fixture.invalid:3306/beta", ask.call_args.args[1])
+        backend.assert_called_once_with(beta, "initial")
+        self.assertEqual(1, len(self.window.selector.cget("values")))
+        self.assertEqual(self.profiles[0]["project_id"], self.window.project_id)
+        self.assertIn("已从项目列表移除", self.window.message.get())
+
+    def test_remove_never_prompts_for_current_or_unselected_config(self):
+        with patch("gxp_project_context.window.messagebox.askyesno") as ask, \
+                patch("gxp_project_context.window.settings.remove_project") as remove:
+            self.button("移除所选配置").invoke()
+            self.assertIn("当前生效", self.window.message.get())
+            self.window.new_project()
+            self.button("移除所选配置").invoke()
+            self.assertIn("请选择", self.window.message.get())
+        ask.assert_not_called()
+        remove.assert_not_called()
 
     def test_save_current_connection_does_not_save_the_selected_target_form(self):
         self.window.selector.current(1)
