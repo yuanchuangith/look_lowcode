@@ -97,11 +97,12 @@ CPM 快照补充页面全貌、菜单、组件、模型、数据集、字典、�
 
 ## 开发库 Schema 快照与可信关系
 
-本地 Schema 快照每天首次使用时刷新，读取 `information_schema` 中的表、字段、备注、索引与约束。关系判断先由 Codex 结合任务语义和 Schema 证据提出、解释并筛选候选；当 Codex 无法形成明确且可验证的结论时，回退到脚本候选生成，再由数据库聚合验证。逻辑关系只有在目标键唯一、字段类型兼容、至少 20 个不同非空来源键且开发库全量匹配率为 100% 时进入可信图谱。验证仅保存计数，不保存或上传业务值。
+本地 Schema 快照在需要关系证据且快照缺失或过期时刷新，读取 `information_schema` 中的表、字段、备注、索引与约束。关系判断先由 Codex 结合任务语义和 Schema 证据提出、解释并筛选候选；当 Codex 无法形成明确且可验证的结论时，回退到脚本候选生成，再由数据库聚合验证。逻辑关系只有在目标键唯一、字段类型兼容、至少 20 个不同非空来源键且开发库全量匹配率为 100% 时进入可信图谱。验证仅保存计数，不保存或上传业务值。刷新失败保留上次成功结果，非强制刷新在 60 秒内不会重试。
 
 - `schema_snapshot_status()`：查看刷新时间、Schema 指纹、关系数量和策略 revision。
 - `refresh_schema_snapshot(force=false)`：刷新本地 Schema 与全量验证关系。
-- `search_database_schema(...)` / `inspect_table_schema(...)`：按名称、备注定位并检查表结构。
+- `search_database_schema(...)`：按名称、备注查找表和字段。优先读当前索引；缺失、过期或旧版时限定 5 秒 SQL 查询预算，只读元数据，不触发全库刷新。查询失败时可返回标记为不完整的旧索引结果。
+- `describe_table(table=...)` / `inspect_table_schema(...)`：已知表名且只需字段和索引时直接查单表；需要完整结构和关系证据时查 Schema 快照。
 - `resolve_table_relation(...)`：关系不新鲜、歧义或冲突时实时查开发库；结果不回写每日快照。
 - `reject_table_relation(...)`：用户明确确认关系错误时写入本机持久否决。
 - `restore_table_relation(...)`：恢复一个已否决 relation ID，并强制重新验证。

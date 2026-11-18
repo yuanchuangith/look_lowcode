@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 from gxp_core.policy_client import PolicyUnavailable, relation_id
 from gxp_core.schema_config import SchemaSnapshotConfig
-from gxp_core.schema_snapshot import SchemaSnapshotManager
+from gxp_core.schema_snapshot import SCHEMA_SEARCH_INDEX, SchemaRefreshCooldown, SchemaSnapshotManager
 
 
 def make_table(name, columns, indexes, foreign_keys=None, comment=""):
@@ -106,6 +109,7 @@ class FakePolicy:
 class SchemaSnapshotTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
+        self.enterContext(patch.dict(os.environ, {"GXP_LOWCODE_RUNTIME_ROOT": self.temp.name}))
         self.config = SchemaSnapshotConfig(
             snapshot_dir=str(Path(self.temp.name) / "snapshot"),
             policy_scope_id="shared-dev",
@@ -278,6 +282,78 @@ class SchemaSnapshotTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             self.manager.refresh(force=True)
         self.assertEqual(before, manifest_path.read_bytes())
+
+    def test_refresh_writes_deep_windows_snapshot_and_reads_legacy_filenames(self):
+        parent = Path(self.temp.name).resolve() / ("a" * 90)
+        deep = parent / ("b" * (209 - len(str(parent)) - 1)) / "snapshot"
+        long_name = "schema_fixture_" + ("t" * 45)
+        self.assertGreater(len(str(deep / "tables" / f"{long_name}-01234567.json")), 260)
+        self.manager = SchemaSnapshotManager(replace(self.config, snapshot_dir=str(deep)), FakeDatabase(), self.policy)
+        self.manager.repository = self.repository
+        schema = json.loads(json.dumps(SCHEMA))
+        schema["tables"].append(make_table(long_name, [bigint("id")], []))
+        with patch.object(self.repository, "load_schema", return_value=schema):
+            self.manager.refresh(force=True)
+        index_path = deep / "indexes" / "tables.json"
+        index = json.loads(index_path.read_text(encoding="utf-8"))
+        for row in index:
+            self.assertRegex(Path(row["file"]).name, r"^[0-9a-f]{24}\.json$")
+        old_name = "tables/orders-01234567.json"
+        (deep / index[0]["file"]).rename(deep / old_name)
+        index[0]["file"] = old_name
+        index_path.write_text(json.dumps(index), encoding="utf-8")
+        self.assertEqual("orders", self.manager.inspect("orders")["table"]["table_name"])
+
+    def test_warm_search_uses_only_v2_index_and_matches_column_comment(self):
+        schema = json.loads(json.dumps(SCHEMA))
+        schema["tables"][0]["columns"][1]["column_comment"] = "Owner reference"
+        with patch.object(self.repository, "load_schema", return_value=schema):
+            self.manager.refresh(force=True)
+        with patch.object(self.manager, "ensure_fresh", side_effect=AssertionError("No schema refresh")), \
+             patch.object(self.manager, "_load_tables", side_effect=AssertionError("No table JSON scan")):
+            result = self.manager.search("Owner Reference")
+        self.assertEqual("fresh_index", result["source"])
+        self.assertTrue(result["complete"])
+        self.assertEqual(["user_id"], [c["column_name"] for c in result["matches"][0]["matched_columns"]])
+        self.assertFalse(result["relationship_evidence"])
+
+    def test_cold_and_legacy_search_use_live_metadata_then_label_fallback(self):
+        with patch.object(self.manager, "ensure_fresh", side_effect=AssertionError("No schema refresh")):
+            with patch.object(self.repository, "search_metadata", create=True, return_value=([{"table_name": "orders"}], True)) as search:
+                self.assertEqual("live_metadata", self.manager.search("User_ID", limit=200)["source"])
+                self.assertEqual(("user_id",), search.call_args.args)
+                self.assertEqual(100, search.call_args.kwargs["limit"])
+            with patch.object(self.repository, "search_metadata", create=True, side_effect=TimeoutError("no catalog")):
+                self.assertEqual("unavailable", self.manager.search("orders")["source"])
+                self.manager.refresh(force=True)
+                manifest_path = self.manager.root / "manifest.json"
+                manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                manifest["version"] = 1
+                manifest["completed_at"] = "2000-01-01T00:00:00Z"
+                manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+                (self.manager.root / SCHEMA_SEARCH_INDEX).unlink()
+                result = self.manager.search("user_id")
+                self.assertEqual("snapshot_fallback", result["source"])
+                self.assertEqual("legacy_index_missing_column_comments", result["partial_reason"])
+                self.assertTrue(result["stale"])
+                self.assertFalse(result["complete"])
+                self.assertFalse(result["relationship_evidence"])
+                self.assertEqual([{"column_name": "user_id"}], result["matches"][0]["matched_columns"])
+
+    def test_failed_refresh_has_per_snapshot_cooldown_after_failure(self):
+        with patch.object(self.repository, "load_schema", side_effect=RuntimeError("offline")) as load:
+            with self.assertRaisesRegex(RuntimeError, "offline"):
+                self.manager.refresh()
+            with self.assertRaisesRegex(SchemaRefreshCooldown, "Recent full schema refresh failed"):
+                self.manager.refresh()
+            load.assert_called_once()
+            self.assertGreater(self.manager.status()["retry_after_seconds"], 0)
+            with self.assertRaisesRegex(RuntimeError, "offline"):
+                self.manager.refresh(force=True)
+            self.assertEqual(2, load.call_count)
+        result = self.manager.refresh(force=True)
+        self.assertTrue(result["refreshed"])
+        self.assertEqual(0, self.manager.status()["retry_after_seconds"])
 
 
 if __name__ == "__main__":

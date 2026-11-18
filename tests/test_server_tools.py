@@ -44,12 +44,16 @@ class ServerToolRegistrationTests(unittest.TestCase):
         paging = tools["inspect_action"].inputSchema["properties"]
         self.assertIn("design_id", paging["value_offset"]["description"])
         self.assertIn("group", paging["value_path"]["description"])
+        targets = next(item for item in paging["targets"]["anyOf"] if item.get("type") == "array")
+        self.assertEqual((1, 10), (targets["minItems"], targets["maxItems"]))
 
     def test_invalid_public_arguments_do_not_construct_database_service(self):
         app = create_mcp()
         invalid = [
             ("inspect_action", {"identifier": "a", "version": "history"}),
             ("inspect_action", {"identifier": "a", "value_limit": 8193}),
+            ("inspect_action", {"identifier": "a", "targets": []}),
+            ("inspect_action", {"identifier": "a", "targets": [{"group_key": "g", "node_key": "n", "value_paths": ["/paramsValue"] * 9}]}),
             ("inspect_component_filters", {"identifier": "a", "component": "c", "response_detail": "all"}),
             ("trace_dynamic_exception", {"text": "stack", "limit": 51}),
             ("diagnose_codex_input", {"text": "stack", "max_output_bytes": 100}),

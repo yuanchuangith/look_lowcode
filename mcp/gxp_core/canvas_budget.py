@@ -51,6 +51,10 @@ def canvas_payload(result: dict[str, Any], limit: int, *, identifier: str, tool:
     return bounded
 
 
+class NodeValueNotFound(ValueError):
+    """A valid parameter path does not exist in the selected node."""
+
+
 def node_value_page(node: dict[str, Any], path: str, offset: int, count: int) -> dict[str, Any]:
     if not path.startswith("/paramsValue") or path.split("/")[1] != "paramsValue":
         raise ValueError("value_path must be a JSON pointer within this node's /paramsValue")
@@ -62,7 +66,7 @@ def node_value_page(node: dict[str, Any], path: str, offset: int, count: int) ->
         try:
             value = value[int(part)] if isinstance(value, list) and part.isdecimal() else value[part]
         except (KeyError, IndexError, TypeError, ValueError) as exc:
-            raise ValueError("value_path was not found in the selected node") from exc
+            raise NodeValueNotFound("value_path was not found in the selected node") from exc
     text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, indent=2)
     if offset > len(text):
         raise ValueError("value_offset exceeds the value length")

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+from time import monotonic
 from pymysql.err import OperationalError
 from unittest.mock import patch
 from contextlib import contextmanager
@@ -84,6 +85,32 @@ class PagingDatabase:
 
 
 class SchemaRepositoryTests(unittest.TestCase):
+    def test_search_metadata_binds_literals_caps_each_table_and_only_reads_catalog(self):
+        database = ScalarDatabase([])
+        calls = []
+
+        def query(sql, params, *, max_rows):
+            calls.append((sql, dict(params), max_rows))
+            if "information_schema.TABLES" in sql:
+                return [{"TABLE_NAME": "wide"}, {"TABLE_NAME": "other"}], False
+            return ([{"TABLE_NAME": "wide", "COLUMN_NAME": f"c{i}", "DATA_TYPE": "varchar"} for i in range(21)]
+                    + [{"TABLE_NAME": "other", "COLUMN_NAME": "matched", "DATA_TYPE": "varchar"}]), False
+
+        database.active.query = query
+        database.active.set_query_timeout = lambda timeout: self.assertLessEqual(timeout, 5000)
+        needle = "%_not_a_wildcard'"
+        result, complete = SchemaMetadataRepository(database).search_metadata(needle, limit=2, deadline=monotonic() + 5)
+        self.assertEqual(2, len(calls))
+        self.assertFalse(complete)
+        self.assertEqual([20, 1], [len(item["matched_columns"]) for item in result])
+        self.assertEqual((3, 2), (calls[0][1]["page"], calls[0][2]))
+        self.assertEqual((21, 42), (calls[1][1]["page"], calls[1][2]))
+        self.assertIn("UNION ALL", calls[1][0])
+        for sql, params, _ in calls:
+            self.assertNotIn(needle, sql)
+            self.assertEqual(needle, params["needle"])
+            self.assertEqual("dev", params["schema"])
+
     def test_bulk_column_timeout_falls_back_to_exact_table_queries(self):
         from gxp_core.db import DatabaseExecutionError
         database = ScalarDatabase([])

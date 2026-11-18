@@ -7,10 +7,11 @@ from .config import ConfigurationError, default_config_path
 from .db import ReadOnlyDatabase
 from .diagnostics import DiagnosticEngine, parse_dynamic_exception
 from .conversation import conversation_context
-from .repository import GxpRepository
+from .repository import DesignNotFound, GxpRepository
 from .source_hints import build_source_hints
 from .canvas_references import select_groups
 from .canvas_budget import canvas_payload, node_value_page, response_limit
+from .canvas_batch import batch_version_drift, inspect_action_batch, validate_batch_request
 from .canvas_evidence import scoped_csharp
 from .diagnostic_output import diagnostic_page, filter_summary, exception_summary
 from .diagnostic_cache import diagnostic_snapshot
@@ -352,10 +353,19 @@ class GxpReadonlyService:
         value_path: str | None = None,
         value_offset: int = 0,
         value_limit: int = 2048,
+        targets: list[dict[str, Any]] | None = None,
+        expected_data_sha256: str | None = None,
+        batch_cursor: str | None = None,
     ) -> dict[str, Any]:
         response_limit(max_output_bytes)
+        validate_batch_request(
+            identifier, targets, design_id=design_id, expected_data_sha256=expected_data_sha256, batch_cursor=batch_cursor,
+            legacy_selectors=(any(selector is not None for selector in (
+                group, terms, node_key, start, end, csharp_line, at_time, focus_fields, value_path,
+            )) or include_params or include_generated_csharp or bool(value_offset)),
+        )
         matches = self.repository.resolve_action(identifier)
-        if not matches:
+        if not matches and targets is None:
             matches = self.repository.search_actions(identifier)
         if len(matches) != 1:
             return canvas_payload({
@@ -368,6 +378,19 @@ class GxpReadonlyService:
                 ),
             }, max_output_bytes, identifier=identifier, tool="inspect_action")
         ref_id = str(matches[0]["ref_id"])
+        if targets is not None:
+            # Do not select a historical row by its ID. A pin must still designate the active copy.
+            try:
+                design = self.repository.load_design(ref_id, version=version, include_deleted=False, include_csharp=False)
+            except DesignNotFound:
+                if design_id is None:
+                    raise
+                return batch_version_drift(target_count=len(targets), action={"ref_id": ref_id})
+            return inspect_action_batch(
+                design, identifier=identifier, version=version, expected_design_id=design_id,
+                expected_data_sha256=expected_data_sha256, targets=targets, batch_cursor=batch_cursor,
+                max_output_bytes=max_output_bytes, value_limit=value_limit,
+            )
         design = self.repository.load_design(
             ref_id,
             version=version,

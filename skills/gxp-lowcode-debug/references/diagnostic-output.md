@@ -3,6 +3,7 @@
 ## 先定位，再精读
 
 - `inspect_action` 第一阶段保持 `include_params=false/include_generated_csharp=false`；明确分组、节点 Key 或窄画布范围后才读参数，超过 10 个节点先缩小范围。
+- 当前副本用 `targets=[{"group_key":"...","node_key":"...","value_paths":["/paramsValue/inputParams/..."]}]` 一次批读最多 10 个精确节点，每节点最多 8 个路径；`published` 和 `draft` 分开读。每个目标有独立状态，`path_not_found` 与值为 `null` 不同。结果裁剪只补必要项：`next_read` 读取剩余目标；长值可将该字段的 `value_cursor` 作为 `batch_cursor` 只续读该字段，按连续字符偏移和 `total_characters` 拼接。两者均保留原 `targets` 与副本，并带回 `design_id` 和 `expected_data_sha256`（结果里的 `design.data_sha256`）。`batch_status=version_drift` 时停止沿旧结果续读，重新定位当下副本。批读不替代嵌套分支的 `inspect_control_flow`，也不读取 C# 或历史设计。
 - 只有异常栈给出精确 C# 行，或节点事实仍不足以解释问题时，才显式 `include_generated_csharp=true`；`terms` 不是读取 C# 的授权。优先 `generated_csharp_scope=group_method`，未解析范围时不把全动作命中当精确节点。
 - `inspect_action` 默认 32 KiB；出现 `response_complete=false`、`evidence_complete=false` 或省略清单，按 `next_read` 补齐当前结论所需证据，保留 `design_id`。未补齐前只报候选，不自动耗尽所有分页。
 

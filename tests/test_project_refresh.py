@@ -48,8 +48,12 @@ class ProjectRefreshTests(unittest.TestCase):
             repository.return_value.validate_relation.assert_not_called()
         manifest = json.loads((self.ctx.snapshot_root("schema") / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual("ready", result["status"])
+        self.assertEqual(2, manifest["version"])
         self.assertEqual(self.ctx.binding(), manifest["project_binding"])
         self.assertTrue(manifest["metadata_only"])
+        search = json.loads((self.ctx.snapshot_root("schema") / "indexes/search-tables.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["schema_fingerprint"], search["schema_fingerprint"])
+        self.assertEqual("id", search["tables"][0]["columns"][0]["column_name"])
         self.assertEqual([], json.loads((self.ctx.snapshot_root("schema") / "relations/verified.json").read_text(encoding="utf-8")))
         self.assertEqual(1, result["counts"]["tables"])
 

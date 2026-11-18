@@ -4,7 +4,8 @@
 
 ## 候选与验证
 
-1. `search_database_schema` 按表名、字段名和备注定位，`inspect_table_schema` 读取表结构、数据库声明外键和当前可信关系。
+1. 已知表名且仅需字段与索引，直接用 `describe_table(table=...)`。表名不明确时，用 `search_database_schema` 按表名、字段名和备注定位：优先读当前本地索引，缺失、过期或旧版索引时，用最多 5 秒的查询预算读开发库元数据；不启动全库刷新或验证关系。`complete=false`、`stale=true` 或 `source=unavailable` 时，不把空结果当作表或字段不存在。
+   需要数据库声明外键或当前可信关系时，再用 `inspect_table_schema` 或定点 `resolve_table_relation`；全库刷新失败后 60 秒内不会自动重试。
 2. 先结合任务语义、业务锚点、备注、外键、唯一键和调用上下文提出候选并解释，再回到 `inspect_table_schema` 或 `resolve_table_relation` 校验。语义不足、候选冲突、证据不完整或无法稳定输出结构化候选时，回退 `generate_candidates` 脚本解析并执行数据库验证。
 3. 推断关系只有目标列唯一、类型兼容、至少 20 个不同非空来源键且全量数据 100% 匹配，才标 `data_verified`。自动选择还要求同组候选验证完整、无截断或未决项且仅一个通过；`verification_scope=explicit_target` 只证明指定目标匹配，不证明全局唯一。
 4. 快照过期、Schema 指纹变化、关系歧义、验证失败或当前故障与关系冲突时，`resolve_table_relation(..., force_live=true)`。按 `live_database` 回答，不把实时结果称为快照；仍不确定则不得选择候选。

@@ -289,6 +289,12 @@ def get_design_versions(
     )
 
 
+class InspectActionTarget(TypedDict):
+    group_key: Annotated[str, Field(min_length=1, max_length=128)]
+    node_key: Annotated[str, Field(min_length=1, max_length=128)]
+    value_paths: NotRequired[Annotated[list[Annotated[str, Field(min_length=12, max_length=512)]], Field(max_length=8)]]
+
+
 def inspect_action(
     identifier: str,
     version: Literal["published", "draft"] = "published",
@@ -309,8 +315,19 @@ def inspect_action(
     value_path: Annotated[str | None, Field(description="JSON pointer under /paramsValue. Requires exact group and node_key; continuation requires the returned design_id.")] = None,
     value_offset: Annotated[int, Field(ge=0, strict=True, description="Unicode character offset; nonzero continuation must pin design_id.")] = 0,
     value_limit: Annotated[int, Field(ge=1, le=8192, strict=True)] = 2048,
+    targets: Annotated[list[InspectActionTarget], Field(min_length=1, max_length=10)] | None = None,
+    expected_data_sha256: Annotated[str | None, Field(pattern="^[a-f0-9]{64}$")] = None,
+    batch_cursor: Annotated[str | None, Field(max_length=160)] = None,
 ) -> dict[str, Any]:
-    """Inspect compact node facts; opt in to params/C# only after narrowing the location."""
+    """Inspect compact node facts; opt in to params/C# only after narrowing the location.
+
+    Batch mode: targets has 1-10 exact group_key/node_key pairs with up to 8 JSON
+    pointers under /paramsValue each. This mode reads only the current draft or
+    published copy, with no C#. Follow only needed next_read/value_cursor entries;
+    reuse the original targets and pin both design_id and expected_data_sha256.
+    A stale pin does not fall back to the archived copy. Explain missing or partial
+    evidence before concluding; use inspect_control_flow for nested branches.
+    """
     return service().inspect_action(
         identifier,
         version=version,
@@ -331,6 +348,9 @@ def inspect_action(
         value_path=value_path,
         value_offset=value_offset,
         value_limit=value_limit,
+        targets=targets,
+        expected_data_sha256=expected_data_sha256,
+        batch_cursor=batch_cursor,
     )
 
 

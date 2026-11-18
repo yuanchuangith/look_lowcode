@@ -3,7 +3,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 import shutil
 import tempfile
 import time
@@ -12,8 +11,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .cpm_runner import _FileLock
-from .db import ReadOnlyDatabase
+from .cpm_runner import _FileLock, _filesystem_path
+from .config import ConfigurationError
+from .db import DatabaseExecutionError, ReadOnlyDatabase
 from .evidence_guidance import guidance
 from .sql_guard import validate_identifier
 from .telemetry import stage
@@ -26,11 +26,22 @@ from .schema_config import (
     schema_status_path,
 )
 from .schema_repository import (
+    SCHEMA_SEARCH_COLUMN_LIMIT,
+    SCHEMA_SEARCH_INDEX,
     SchemaMetadataRepository,
     columns_compatible,
     generate_candidates,
+    schema_search_index_entry,
     unique_keys,
 )
+
+
+SCHEMA_REFRESH_COOLDOWN_SECONDS = 60
+SCHEMA_SEARCH_SQL_SECONDS = 5
+
+
+class SchemaRefreshCooldown(RuntimeError):
+    pass
 
 
 def _now() -> str:
@@ -48,12 +59,13 @@ def _parse_time(value: str | None) -> float:
 
 def _read_json(path: Path, default: Any) -> Any:
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(Path(_filesystem_path(path)).read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return default
 
 
 def _write_json(path: Path, value: Any) -> None:
+    path = Path(_filesystem_path(path))
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, ensure_ascii=False, indent=2, default=str) + "\n", encoding="utf-8")
 
@@ -64,8 +76,7 @@ def _schema_fingerprint(schema: dict[str, Any]) -> str:
 
 
 def _table_file_name(table: str) -> str:
-    readable = re.sub(r"[^A-Za-z0-9_.-]+", "_", table).strip("._") or "table"
-    return f"{readable[:80]}-{hashlib.sha256(table.encode('utf-8')).hexdigest()[:8]}.json"
+    return f"{hashlib.sha256(table.encode('utf-8')).hexdigest()[:24]}.json"
 
 
 def _column_map(table: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -127,16 +138,18 @@ class SchemaSnapshotManager:
         self.repository = SchemaMetadataRepository(self.database, query_timeout_ms=self.config.query_timeout_ms)
         self.policy = policy or RelationPolicyClient(self.config)
         self.root = Path(self.config.snapshot_dir).resolve()
+        self._refresh_key = hashlib.sha256(f"{self.root}\n{self.config.policy_scope_id}".encode("utf-8")).hexdigest()
 
     def _manifest(self) -> dict[str, Any]:
-        return _read_json(self.root / "manifest.json", {})
+        manifest = _read_json(self.root / "manifest.json", {})
+        return manifest if isinstance(manifest, dict) else {}
 
     def _fresh(self, manifest: dict[str, Any]) -> bool:
         return bool(manifest.get("completed_at")) and time.time() - _parse_time(manifest.get("completed_at")) < self.config.ttl_seconds
 
     def status(self) -> dict[str, Any]:
         manifest = self._manifest()
-        status = _read_json(schema_status_path(self.config), {})
+        status = self._refresh_status()
         try:
             policy = self.policy.sync()
             policy_status = {"available": True, "storage": "local", "scope_id": self.config.policy_scope_id,
@@ -146,7 +159,7 @@ class SchemaSnapshotManager:
         return {
             "configured": True,
             "snapshot_dir": str(self.root),
-            "exists": self.root.is_dir() and bool(manifest),
+            "exists": bool(manifest),
             "completed_at": manifest.get("completed_at"),
             "ttl_seconds": self.config.ttl_seconds,
             "stale": not self._fresh(manifest),
@@ -154,7 +167,25 @@ class SchemaSnapshotManager:
             "counts": manifest.get("counts", {}),
             "policy": policy_status,
             "last_error": status.get("last_error"),
+            "retry_after_seconds": self._cooldown_seconds(status),
         }
+
+    def _refresh_status(self) -> dict[str, Any]:
+        status = _read_json(schema_status_path(self.config), {})
+        return status if isinstance(status, dict) and status.get("snapshot_key") in (None, self._refresh_key) else {}
+
+    def _cooldown_seconds(self, status: dict[str, Any]) -> int:
+        # Historical status files had no scope key. Do not block based on an unscoped failure.
+        if status.get("snapshot_key") != self._refresh_key or not status.get("failed_at"):
+            return 0
+        elapsed = max(0, int(time.time() - _parse_time(status["failed_at"])))
+        return max(0, SCHEMA_REFRESH_COOLDOWN_SECONDS - elapsed)
+
+    def _check_cooldown(self, force: bool) -> None:
+        if not force:
+            remaining = self._cooldown_seconds(self._refresh_status())
+            if remaining:
+                raise SchemaRefreshCooldown(f"Recent full schema refresh failed; retry in {remaining}s or explicitly force refresh")
 
     def ensure_fresh(self) -> dict[str, Any]:
         return self.refresh(force=False)
@@ -163,19 +194,26 @@ class SchemaSnapshotManager:
         manifest = self._manifest()
         if not force and self._fresh(manifest):
             return {"refreshed": False, **self.status()}
+        self._check_cooldown(force)
         started = time.monotonic()
         timeout = float(self.config.refresh_timeout_seconds)
-        with _FileLock(schema_lock_path(self.config), timeout):
+        status_path = Path(_filesystem_path(schema_status_path(self.config)))
+        lock_path = Path(_filesystem_path(schema_lock_path(self.config)))
+        with _FileLock(lock_path, timeout):
             manifest = self._manifest()
             if not force and self._fresh(manifest):
                 return {"refreshed": False, **self.status()}
+            self._check_cooldown(force)
             try:
                 result = self._refresh_locked(started, timeout)
-                _atomic_json(schema_status_path(self.config), {"last_success_at": _now(), "last_error": None})
-                return result
+                _atomic_json(status_path, {
+                    "snapshot_key": self._refresh_key, "last_success_at": _now(), "last_error": None,
+                })
+                return {**result, "last_error": None, "retry_after_seconds": 0}
             except Exception as exc:
-                _atomic_json(schema_status_path(self.config), {
-                    "last_success_at": _read_json(schema_status_path(self.config), {}).get("last_success_at"),
+                _atomic_json(status_path, {
+                    "snapshot_key": self._refresh_key,
+                    "last_success_at": self._refresh_status().get("last_success_at"),
                     "last_error": f"{type(exc).__name__}: {str(exc)[:240]}",
                     "failed_at": _now(),
                 })
@@ -184,7 +222,8 @@ class SchemaSnapshotManager:
     def _refresh_locked(self, started: float, timeout: float) -> dict[str, Any]:
         deadline = started + timeout
         validation_deadline = deadline - min(5.0, timeout * 0.1)
-        schema = self.repository.load_schema(deadline=validation_deadline)
+        with stage("schema.refresh_metadata"):
+            schema = self.repository.load_schema(deadline=validation_deadline)
         fingerprint = _schema_fingerprint(schema)
         policy_payload = None
         policy_error = None
@@ -193,7 +232,8 @@ class SchemaSnapshotManager:
         except Exception as exc:
             policy_error = f"{type(exc).__name__}: {str(exc)[:160]}"
         rejected = set((policy_payload or {}).get("rejections", []))
-        candidates = generate_candidates(schema)
+        with stage("schema.generate_candidates"):
+            candidates = generate_candidates(schema)
         previous_verified_ids = {
             str(item.get("relation_id"))
             for item in _read_json(self.root / "relations" / "verified.json", [])
@@ -316,7 +356,8 @@ class SchemaSnapshotManager:
             })
         if time.monotonic() >= deadline:
             raise TimeoutError("schema refresh deadline exceeded")
-        self._write_snapshot(schema, fingerprint, verified, attempts, policy_payload, policy_error)
+        with stage("schema.persist_snapshot", count=len(schema.get("tables", []))):
+            self._write_snapshot(schema, fingerprint, verified, attempts, policy_payload, policy_error)
         return {"refreshed": True, **self.status()}
 
     def _write_snapshot(
@@ -328,9 +369,12 @@ class SchemaSnapshotManager:
         policy_payload: dict[str, Any] | None,
         policy_error: str | None,
     ) -> None:
-        self.root.parent.mkdir(parents=True, exist_ok=True)
-        work = Path(tempfile.mkdtemp(prefix=".schema-refresh-", dir=self.root.parent))
+        parent = Path(_filesystem_path(self.root.parent))
+        parent.mkdir(parents=True, exist_ok=True)
+        work = Path(tempfile.mkdtemp(prefix=".s-", dir=parent))
+        root = Path(_filesystem_path(self.root))
         backup = self.root.parent / f".{self.root.name}.previous"
+        backup = Path(_filesystem_path(backup))
         try:
             table_index = []
             declared_count = 0
@@ -349,12 +393,16 @@ class SchemaSnapshotManager:
             _write_json(work / "relations" / "verified.json", verified)
             _write_json(work / "validation-attempts.json", attempts)
             _write_json(work / "indexes" / "tables.json", table_index)
+            _write_json(work / SCHEMA_SEARCH_INDEX, {
+                "schema_fingerprint": fingerprint,
+                "tables": [schema_search_index_entry(table) for table in schema.get("tables", [])],
+            })
             _write_json(work / "indexes" / "table-usage.json", {
                 "generated_at": _now(), "usages": [],
                 "note": "Low-code table usage is enriched at query time from action facts.",
             })
             _write_json(work / "manifest.json", {
-                "version": 1,
+                "version": 2,
                 "database": schema.get("database"),
                 "completed_at": _now(),
                 "ttl_seconds": self.config.ttl_seconds,
@@ -375,13 +423,13 @@ class SchemaSnapshotManager:
             })
             if backup.exists():
                 shutil.rmtree(backup)
-            if self.root.exists():
-                os.replace(self.root, backup)
+            if root.exists():
+                os.replace(root, backup)
             try:
-                os.replace(work, self.root)
+                os.replace(work, root)
             except Exception:
-                if backup.exists() and not self.root.exists():
-                    os.replace(backup, self.root)
+                if backup.exists() and not root.exists():
+                    os.replace(backup, root)
                 raise
             if backup.exists():
                 shutil.rmtree(backup)
@@ -399,23 +447,69 @@ class SchemaSnapshotManager:
         return result
 
     def search(self, query: str, *, limit: int = 20) -> dict[str, Any]:
-        self.ensure_fresh()
         needle = query.strip().lower()
         if not needle:
             raise ValueError("query 不能为空")
+        limit = max(1, min(100, int(limit)))
+        manifest = self._manifest()
+        policy = manifest.get("policy")
+        if (manifest.get("database") != self.database.config.database or not isinstance(policy, dict)
+                or policy.get("scope_id") != self.config.policy_scope_id):
+            manifest = {}
+        index = _read_json(self.root / SCHEMA_SEARCH_INDEX, {})
+        current_index = (isinstance(index, dict) and manifest.get("version") == 2 and bool(manifest.get("schema_fingerprint"))
+                         and index.get("schema_fingerprint") == manifest.get("schema_fingerprint")
+                         and isinstance(index.get("tables"), list))
+        response = {"query": query, "relationship_evidence": False}
+        if current_index and self._fresh(manifest):
+            matches, complete = self._search_index(index["tables"], needle, limit)
+            return {**response, "evidence_layer": "数据库架构快照", "source": "fresh_index",
+                    "matches": matches, "complete": complete, "stale": False}
+        try:
+            with stage("schema.search_live_metadata"):
+                matches, complete = self.repository.search_metadata(
+                    needle, limit=limit, deadline=time.monotonic() + SCHEMA_SEARCH_SQL_SECONDS,
+                )
+            return {**response, "evidence_layer": "数据库实时元数据", "source": "live_metadata",
+                    "matches": matches, "complete": complete, "stale": False}
+        except (ConfigurationError, DatabaseExecutionError, OSError) as exc:
+            legacy = _read_json(self.root / "indexes" / "tables.json", None) if manifest and not current_index else None
+            has_snapshot = current_index or isinstance(legacy, list)
+            tables = index["tables"] if current_index else legacy or []
+            matches, _ = self._search_index(tables, needle, limit)
+            return {**response, "evidence_layer": "数据库架构快照" if has_snapshot else "尚未确认",
+                    "source": "snapshot_fallback" if has_snapshot else "unavailable",
+                    "matches": matches, "complete": False, "stale": has_snapshot and not self._fresh(manifest),
+                    "partial_reason": ("legacy_index_missing_column_comments" if isinstance(legacy, list)
+                                       else "live_metadata_unavailable"),
+                    "error_type": type(exc).__name__}
+
+    @staticmethod
+    def _search_index(tables: list[dict[str, Any]], needle: str, limit: int) -> tuple[list[dict[str, Any]], bool]:
+        def hit(value: Any) -> bool:
+            return needle in str(value or "").lower()
+
         matches = []
-        for table in self._load_tables().values():
-            table_hit = needle in str(table.get("table_name", "")).lower() or needle in str(table.get("table_comment", "")).lower()
-            columns = [column for column in table.get("columns", []) if needle in str(column.get("column_name", "")).lower() or needle in str(column.get("column_comment", "")).lower()]
-            if table_hit or columns:
-                matches.append({
-                    "table_name": table.get("table_name"),
-                    "table_comment": table.get("table_comment"),
-                    "matched_columns": columns[:20],
-                })
-            if len(matches) >= max(1, min(limit, 100)):
-                break
-        return {"evidence_layer": "数据库架构快照", "query": query, "matches": matches}
+        complete = True
+        for table in tables:
+            if not isinstance(table, dict) or not table.get("table_name"):
+                complete = False
+                continue
+            columns = []
+            for column in table.get("columns") or []:
+                item = {"column_name": column} if isinstance(column, str) else column
+                if isinstance(item, dict) and (hit(item.get("column_name")) or hit(item.get("column_comment"))):
+                    if len(columns) == SCHEMA_SEARCH_COLUMN_LIMIT:
+                        complete = False
+                        break
+                    columns.append(item)
+            if not (columns or hit(table.get("table_name")) or hit(table.get("table_comment"))):
+                continue
+            if len(matches) == limit:
+                return matches, False
+            matches.append({"table_name": table["table_name"], "table_comment": table.get("table_comment"),
+                            "matched_columns": columns})
+        return matches, complete
 
     def inspect(self, table: str, *, include_relations: bool = True) -> dict[str, Any]:
         self.ensure_fresh()
@@ -656,7 +750,10 @@ def refresh_schema_snapshot(force: bool = False) -> dict[str, Any]:
 
 
 def search_database_schema(query: str, limit: int = 20) -> dict[str, Any]:
-    """Search local table/column names and comments without reading business rows."""
+    """Search table/column names and comments using a fresh index or up to 5s of metadata SQL.
+    Does not refresh the full schema, verify relationships, or read business rows. Partial results
+    and stale fallback are labeled; use describe_table for exact known-table structure.
+    """
     return SchemaSnapshotManager().search(query, limit=limit)
 
 
